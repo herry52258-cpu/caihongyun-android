@@ -150,6 +150,13 @@ class MainActivity : BaseActivity<MainDesign>() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!SetupActivity.isSetupDone(this)) {
+            startActivity(Intent(this, SetupActivity::class.java))
+            finish()
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val requestPermissionLauncher =
                 registerForActivityResult(RequestPermission()

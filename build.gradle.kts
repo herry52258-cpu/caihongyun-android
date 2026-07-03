@@ -47,7 +47,7 @@ subprojects {
         defaultConfig {
             if (isApp) {
                 val customApplicationId = queryConfigProperty("custom.application.id") as? String?
-                applicationId = customApplicationId.takeIf { it?.isNotBlank() == true } ?: "com.github.metacubex.clash"
+                applicationId = customApplicationId.takeIf { it?.isNotBlank() == true } ?: "xyz.caihongyun.app"
             }
 
             project.name.let { name ->
@@ -77,7 +77,7 @@ subprojects {
             if (!isApp) {
                 consumerProguardFiles("consumer-rules.pro")
             } else {
-                setProperty("archivesBaseName", "cmfa-$versionName")
+                setProperty("archivesBaseName", "caihongyun-$versionName")
             }
         }
 
@@ -119,18 +119,11 @@ subprojects {
             create("meta") {
 
                 dimension = flavorDimensionList[0]
-                if (!removeSuffix) {
-                    versionNameSuffix = ".Meta"
-                }
 
                 buildConfigField("boolean", "PREMIUM", "Boolean.parseBoolean(\"false\")")
 
                 resValue("string", "launch_name", "@string/launch_name_meta")
                 resValue("string", "application_name", "@string/application_name_meta")
-
-                if (isApp && !removeSuffix) {
-                    applicationIdSuffix = ".meta"
-                }
             }
         }
 

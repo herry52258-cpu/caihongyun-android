@@ -178,6 +178,12 @@
             android:exported="false"
             android:label="@string/access_control_packages" />
         <activity
+            android:name=".SetupActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="彩虹云" />
+
+        <activity
             android:name=".HelpActivity"
             android:configChanges="uiMode"
             android:exported="false"
