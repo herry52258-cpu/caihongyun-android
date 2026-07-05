@@ -23,7 +23,6 @@ import java.net.InetAddress
 import java.net.Socket
 import java.net.URL
 import javax.net.ssl.*
-import javax.net.ssl.SNIHostName
 
 class SetupActivity : AppCompatActivity() {
 
@@ -40,40 +39,47 @@ class SetupActivity : AppCompatActivity() {
     companion object {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
-        const val XBOARD_HOST = "caihonglu.com"
+        const val XBOARD_HOST = "13141069.xyz"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // Cloudflare CDN 备用 IP，DNS 被污染时直连用
-        val CF_FALLBACK_IPS = listOf("104.21.8.88", "172.67.139.15")
+        // 13141069.xyz Cloudflare CDN IP，DNS 被污染时直连用
+        val CF_FALLBACK_IPS = listOf("172.67.221.198", "104.21.78.130")
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return !prefs.getString(KEY_SUBSCRIPTION_URL, null).isNullOrBlank()
         }
 
-        // 创建绕过 DNS、通过硬编码 IP 直连的 HTTPS 连接（SNI 仍是 caihonglu.com，SSL 验证正常）
+        // 创建绕过 DNS、通过硬编码 IP 直连的 HTTPS 连接
+        // 关键修复: 把 XBOARD_HOST (域名) 传给 baseFactory，让 BoringSSL 正确设置 SNI
+        // 错误做法是把 IP 传给 baseFactory，会导致 SNI 缺失→Cloudflare 拒绝握手
         private fun openConnection(ip: String, path: String): HttpURLConnection {
             val conn = URL("https://$ip$path").openConnection() as HttpsURLConnection
             val baseFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
             val baseVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
             conn.sslSocketFactory = object : SSLSocketFactory() {
-                private fun setSni(s: Socket): Socket {
-                    if (s is SSLSocket) s.sslParameters = s.sslParameters.apply {
-                        serverNames = listOf(SNIHostName(XBOARD_HOST))
-                    }
-                    return s
-                }
                 override fun getDefaultCipherSuites() = baseFactory.defaultCipherSuites
                 override fun getSupportedCipherSuites() = baseFactory.supportedCipherSuites
-                override fun createSocket(s: Socket, h: String, p: Int, ac: Boolean) =
-                    setSni(baseFactory.createSocket(s, h, p, ac))
-                override fun createSocket(h: String, p: Int) =
-                    setSni(baseFactory.createSocket(ip, p))
-                override fun createSocket(h: String, p: Int, la: InetAddress, lp: Int) =
-                    setSni(baseFactory.createSocket(ip, p, la, lp))
-                override fun createSocket(a: InetAddress, p: Int) =
-                    setSni(baseFactory.createSocket(a, p))
-                override fun createSocket(a: InetAddress, p: Int, la: InetAddress, lp: Int) =
-                    setSni(baseFactory.createSocket(a, p, la, lp))
+                // Android HttpsURLConnection 走这条路径: 已有 TCP socket，包一层 SSL
+                // 传 XBOARD_HOST 而非 h(=IP)，BoringSSL 才会在 ClientHello 里带正确 SNI
+                override fun createSocket(s: Socket, h: String, p: Int, ac: Boolean): Socket =
+                    baseFactory.createSocket(s, XBOARD_HOST, p, ac)
+                // 下面三个用于新建 TCP+SSL 的情况，直连硬编码 IP 但用域名做 SNI
+                override fun createSocket(h: String, p: Int): Socket {
+                    val plain = Socket(ip, p)
+                    return baseFactory.createSocket(plain, XBOARD_HOST, p, true)
+                }
+                override fun createSocket(h: String, p: Int, la: InetAddress, lp: Int): Socket {
+                    val plain = Socket(ip, p)
+                    return baseFactory.createSocket(plain, XBOARD_HOST, p, true)
+                }
+                override fun createSocket(a: InetAddress, p: Int): Socket {
+                    val plain = Socket(ip, p)
+                    return baseFactory.createSocket(plain, XBOARD_HOST, p, true)
+                }
+                override fun createSocket(a: InetAddress, p: Int, la: InetAddress, lp: Int): Socket {
+                    val plain = Socket(ip, p)
+                    return baseFactory.createSocket(plain, XBOARD_HOST, p, true)
+                }
             }
             conn.hostnameVerifier = HostnameVerifier { _, session ->
                 baseVerifier.verify(XBOARD_HOST, session)
@@ -381,8 +387,8 @@ class SetupActivity : AppCompatActivity() {
                 }
             }
         }
-        wv.loadUrl("https://${CF_FALLBACK_IPS[0]}/#/register")
-        // 直接用IP加载，Host会通过shouldInterceptRequest处理资源
+        // 用域名加载，shouldInterceptRequest 会拦截并通过硬编码 IP 路由，SNI 正确
+        wv.loadUrl("$XBOARD_BASE/#/register")
         setContentView(wv)
     }
 
