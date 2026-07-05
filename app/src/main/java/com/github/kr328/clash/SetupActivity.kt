@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.view.Gravity
+import android.webkit.*
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -176,16 +177,13 @@ class SetupActivity : AppCompatActivity() {
                 setOnClickListener { showUrlMode() }
             }
             val registerLink = TextView(this).apply {
-                text = "还没有账号？点此注册（需要能上网）"
+                text = "还没有账号？点此注册"
                 textSize = 12f
                 gravity = Gravity.CENTER
-                setTextColor(0xFF888888.toInt())
+                setTextColor(0xFF7C3AED.toInt())
                 setPadding(0, (12 * dp).toInt(), 0, 0)
                 isClickable = true
-                setOnClickListener {
-                    startActivity(Intent(Intent.ACTION_VIEW,
-                        android.net.Uri.parse("$XBOARD_BASE/#/register")))
-                }
+                setOnClickListener { showRegisterWebView() }
             }
 
             layout.addView(emailLabel)
@@ -347,6 +345,46 @@ class SetupActivity : AppCompatActivity() {
 
             subUrl
         }
+
+    private fun showRegisterWebView() {
+        val wv = WebView(this)
+        wv.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            setSupportZoom(false)
+        }
+        wv.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                val host = request.url.host ?: return null
+                if (!host.contains(XBOARD_HOST)) return null
+                return try {
+                    val path = request.url.path ?: "/"
+                    val query = request.url.query
+                    val fullPath = if (query != null) "$path?$query" else path
+                    val conn = openConnection(CF_FALLBACK_IPS[0], fullPath)
+                    conn.requestMethod = request.method
+                    conn.connectTimeout = 10000
+                    conn.readTimeout = 15000
+                    request.requestHeaders.forEach { (k, v) ->
+                        if (k != null && k != "Host") conn.setRequestProperty(k, v)
+                    }
+                    val mime = conn.contentType?.split(";")?.firstOrNull() ?: "text/html"
+                    val encoding = conn.contentEncoding ?: "utf-8"
+                    WebResourceResponse(mime, encoding, conn.inputStream)
+                } catch (_: Exception) { null }
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                // 注册完成后返回登录页
+                if (url.contains("/login") || url.contains("/#/")) {
+                    showLoginMode()
+                }
+            }
+        }
+        wv.loadUrl("https://${CF_FALLBACK_IPS[0]}/#/register")
+        // 直接用IP加载，Host会通过shouldInterceptRequest处理资源
+        setContentView(wv)
+    }
 
     private suspend fun importSubscription(url: String) {
         withProfile {
