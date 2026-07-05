@@ -225,7 +225,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.9 · $XBOARD_HOST"
+            text = "v1.0.10 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -440,11 +440,42 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private suspend fun importSubscription(url: String) {
-        withProfile {
-            val uuid = create(type = Profile.Type.Url, name = "彩虹云订阅", source = url)
-            commit(uuid)
-            val profile = queryByUUID(uuid) ?: return@withProfile
-            setActive(profile)
+        withContext(Dispatchers.IO) {
+            // Extract path from subscription URL — handles any domain or IP
+            val path = try {
+                val uri = java.net.URI(url)
+                uri.rawPath + if (uri.rawQuery != null) "?${uri.rawQuery}" else ""
+            } catch (e: Exception) {
+                "/s/" + url.substringAfterLast("/s/")
+            }
+
+            // Fetch Clash YAML via our socket client (bypasses ClashMeta Go HTTP entirely)
+            // ClashMetaForAndroid UA makes xboard return Clash YAML instead of base64 proxy list
+            val (code, content) = httpApiRequest(
+                "GET", path,
+                reqHeaders = mapOf("User-Agent" to "ClashMetaForAndroid/2.10.1")
+            )
+            if (code != 200) throw Exception("获取订阅内容失败 (HTTP $code)")
+            if (!content.contains("proxies:") && !content.contains("proxy-providers:")) {
+                throw Exception("订阅格式错误 (无节点数据)")
+            }
+
+            // Create a File-type profile — ClashMeta reads local file, no HTTP request
+            val uuid = withProfile {
+                create(type = Profile.Type.File, name = "彩虹云订阅", source = "")
+            }
+
+            // Write subscription YAML into ClashMeta's pending directory
+            filesDir.resolve("pending").resolve(uuid.toString())
+                .resolve("config.yaml")
+                .writeText(content)
+
+            // Commit: File type validates local file, no HTTP fetch needed
+            withProfile {
+                commit(uuid)
+                val profile = queryByUUID(uuid) ?: return@withProfile
+                setActive(profile)
+            }
         }
     }
 }
