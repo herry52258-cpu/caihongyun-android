@@ -18,7 +18,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.Socket
 import java.net.URL
+import javax.net.ssl.*
+import javax.net.ssl.SNIHostName
 
 class SetupActivity : AppCompatActivity() {
 
@@ -35,11 +39,68 @@ class SetupActivity : AppCompatActivity() {
     companion object {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
-        const val XBOARD_BASE = "https://caihonglu.com"
+        const val XBOARD_HOST = "caihonglu.com"
+        const val XBOARD_BASE = "https://$XBOARD_HOST"
+        // Cloudflare CDN 备用 IP，DNS 被污染时直连用
+        val CF_FALLBACK_IPS = listOf("104.21.8.88", "172.67.139.15")
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return !prefs.getString(KEY_SUBSCRIPTION_URL, null).isNullOrBlank()
+        }
+
+        // 创建绕过 DNS、通过硬编码 IP 直连的 HTTPS 连接（SNI 仍是 caihonglu.com，SSL 验证正常）
+        private fun openConnection(ip: String, path: String): HttpURLConnection {
+            val conn = URL("https://$ip$path").openConnection() as HttpsURLConnection
+            // 用原始 SSLSocketFactory，但覆盖 SNI 为正确域名
+            conn.sslSocketFactory = object : SSLSocketFactory() {
+                private val delegate = HttpsURLConnection.defaultSSLSocketFactory
+                private fun setSni(s: Socket): Socket {
+                    if (s is SSLSocket) s.sslParameters = s.sslParameters.apply {
+                        serverNames = listOf(SNIHostName(XBOARD_HOST))
+                    }
+                    return s
+                }
+                override fun getDefaultCipherSuites() = delegate.defaultCipherSuites
+                override fun getSupportedCipherSuites() = delegate.supportedCipherSuites
+                override fun createSocket(s: Socket, h: String, p: Int, ac: Boolean) =
+                    setSni(delegate.createSocket(s, h, p, ac))
+                override fun createSocket(h: String, p: Int) =
+                    setSni(delegate.createSocket(ip, p))
+                override fun createSocket(h: String, p: Int, la: InetAddress, lp: Int) =
+                    setSni(delegate.createSocket(ip, p, la, lp))
+                override fun createSocket(a: InetAddress, p: Int) =
+                    setSni(delegate.createSocket(a, p))
+                override fun createSocket(a: InetAddress, p: Int, la: InetAddress, lp: Int) =
+                    setSni(delegate.createSocket(a, p, la, lp))
+            }
+            // 验证证书时检查是否是 caihonglu.com 的证书（安全）
+            conn.hostnameVerifier = HostnameVerifier { _, session ->
+                HttpsURLConnection.defaultHostnameVerifier.verify(XBOARD_HOST, session)
+            }
+            conn.setRequestProperty("Host", XBOARD_HOST)
+            return conn
+        }
+
+        // 先走正常域名，超时则轮询 Cloudflare 硬编码 IP
+        fun openApiConnection(path: String): HttpURLConnection {
+            try {
+                val conn = URL("$XBOARD_BASE$path").openConnection() as HttpURLConnection
+                conn.connectTimeout = 6000
+                conn.readTimeout = 15000
+                return conn
+            } catch (_: Exception) {}
+            // DNS 解析失败，改用硬编码 IP
+            var last: Exception = Exception("连接失败")
+            for (ip in CF_FALLBACK_IPS) {
+                try {
+                    val conn = openConnection(ip, path)
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 15000
+                    return conn
+                } catch (e: Exception) { last = e }
+            }
+            throw last
         }
     }
 
@@ -247,14 +308,11 @@ class SetupActivity : AppCompatActivity() {
 
     private suspend fun doLogin(email: String, password: String): String =
         withContext(Dispatchers.IO) {
-            val loginUrl = URL("$XBOARD_BASE/api/v1/passport/auth/login")
-            val conn = loginUrl.openConnection() as HttpURLConnection
+            val conn = openApiConnection("/api/v1/passport/auth/login")
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", "application/json")
             conn.doOutput = true
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
 
             val body = JSONObject().apply {
                 put("email", email)
@@ -279,13 +337,10 @@ class SetupActivity : AppCompatActivity() {
 
     private suspend fun getSubscriptionUrl(token: String): String =
         withContext(Dispatchers.IO) {
-            val url = URL("$XBOARD_BASE/api/v1/user/getSubscribe")
-            val conn = url.openConnection() as HttpURLConnection
+            val conn = openApiConnection("/api/v1/user/getSubscribe")
             conn.requestMethod = "GET"
             conn.setRequestProperty("Authorization", token)
             conn.setRequestProperty("Accept", "application/json")
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
 
             val responseCode = conn.responseCode
             val response = conn.inputStream.bufferedReader().readText()
