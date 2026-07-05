@@ -141,10 +141,18 @@ class SetupActivity : AppCompatActivity() {
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
-            setPadding(0, 0, 0, (32 * dp).toInt())
+            setPadding(0, 0, 0, (8 * dp).toInt())
+        }
+        val versionLabel = TextView(this).apply {
+            text = "v1.0.7 · $XBOARD_HOST"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF888888.toInt())
+            setPadding(0, 0, 0, (24 * dp).toInt())
         }
         layout.addView(logo)
         layout.addView(subtitle)
+        layout.addView(versionLabel)
 
         val statusText = TextView(this).apply {
             text = ""
