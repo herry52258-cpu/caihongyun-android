@@ -35,7 +35,7 @@ class SetupActivity : AppCompatActivity() {
     companion object {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
-        const val XBOARD_BASE = "https://13141069.xyz"
+        const val XBOARD_BASE = "https://caihonglu.com"
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
