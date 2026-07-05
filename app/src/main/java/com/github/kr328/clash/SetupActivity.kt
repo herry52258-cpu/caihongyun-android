@@ -52,31 +52,30 @@ class SetupActivity : AppCompatActivity() {
         // 创建绕过 DNS、通过硬编码 IP 直连的 HTTPS 连接（SNI 仍是 caihonglu.com，SSL 验证正常）
         private fun openConnection(ip: String, path: String): HttpURLConnection {
             val conn = URL("https://$ip$path").openConnection() as HttpsURLConnection
-            // 用原始 SSLSocketFactory，但覆盖 SNI 为正确域名
+            val baseFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
+            val baseVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
             conn.sslSocketFactory = object : SSLSocketFactory() {
-                private val delegate = HttpsURLConnection.defaultSSLSocketFactory
                 private fun setSni(s: Socket): Socket {
                     if (s is SSLSocket) s.sslParameters = s.sslParameters.apply {
                         serverNames = listOf(SNIHostName(XBOARD_HOST))
                     }
                     return s
                 }
-                override fun getDefaultCipherSuites() = delegate.defaultCipherSuites
-                override fun getSupportedCipherSuites() = delegate.supportedCipherSuites
+                override fun getDefaultCipherSuites() = baseFactory.defaultCipherSuites
+                override fun getSupportedCipherSuites() = baseFactory.supportedCipherSuites
                 override fun createSocket(s: Socket, h: String, p: Int, ac: Boolean) =
-                    setSni(delegate.createSocket(s, h, p, ac))
+                    setSni(baseFactory.createSocket(s, h, p, ac))
                 override fun createSocket(h: String, p: Int) =
-                    setSni(delegate.createSocket(ip, p))
+                    setSni(baseFactory.createSocket(ip, p))
                 override fun createSocket(h: String, p: Int, la: InetAddress, lp: Int) =
-                    setSni(delegate.createSocket(ip, p, la, lp))
+                    setSni(baseFactory.createSocket(ip, p, la, lp))
                 override fun createSocket(a: InetAddress, p: Int) =
-                    setSni(delegate.createSocket(a, p))
+                    setSni(baseFactory.createSocket(a, p))
                 override fun createSocket(a: InetAddress, p: Int, la: InetAddress, lp: Int) =
-                    setSni(delegate.createSocket(a, p, la, lp))
+                    setSni(baseFactory.createSocket(a, p, la, lp))
             }
-            // 验证证书时检查是否是 caihonglu.com 的证书（安全）
             conn.hostnameVerifier = HostnameVerifier { _, session ->
-                HttpsURLConnection.defaultHostnameVerifier.verify(XBOARD_HOST, session)
+                baseVerifier.verify(XBOARD_HOST, session)
             }
             conn.setRequestProperty("Host", XBOARD_HOST)
             return conn
