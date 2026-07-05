@@ -108,7 +108,7 @@ class SetupActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        showUrlMode()
+        showLoginMode()
     }
 
     private fun showLoginMode() {
@@ -138,7 +138,7 @@ class SetupActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val subtitle = TextView(this).apply {
-            text = if (!useUrlMode) "账号登录" else "粘贴订阅链接即可使用，无需注册"
+            text = "安全自由，专属LGBT社群"
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -240,7 +240,7 @@ class SetupActivity : AppCompatActivity() {
                 minLines = 2
             }
             val hint = TextView(this).apply {
-                text = "订阅链接由管理员发送给你，格式为 https://caihonglu.com/s/xxx"
+                text = "可从管理员或彩虹云群里获取订阅链接"
                 textSize = 12f
                 setTextColor(0xFF888888.toInt())
                 setPadding(0, (8 * dp).toInt(), 0, 0)
