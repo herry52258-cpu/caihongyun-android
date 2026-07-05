@@ -41,8 +41,13 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val XBOARD_HOST = "13141069.xyz"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // Cloudflare CDN IPs for 13141069.xyz + direct server IP as last-resort
-        val CF_FALLBACK_IPS = listOf("172.67.221.198", "104.21.78.130", "67.215.237.125")
+        // Direct server IP + port 8080 (plain HTTP, no TLS).
+        // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
+        // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
+        const val XBOARD_IP = "67.215.237.125"
+        const val XBOARD_API_PORT = 8080
+        // Cloudflare IPs still used for WebView HTTPS (registration page)
+        val CF_FALLBACK_IPS = listOf("172.67.221.198", "104.21.78.130", XBOARD_IP)
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -51,44 +56,53 @@ class SetupActivity : AppCompatActivity() {
 
         private data class RawResponse(val code: Int, val headers: Map<String, String>, val body: ByteArray)
 
+        private fun parseRawHttp(raw: ByteArray): RawResponse {
+            var sepPos = -1
+            for (i in 0..raw.size - 4) {
+                if (raw[i] == 13.toByte() && raw[i+1] == 10.toByte() &&
+                    raw[i+2] == 13.toByte() && raw[i+3] == 10.toByte()) {
+                    sepPos = i; break
+                }
+            }
+            if (sepPos < 0) throw Exception("无效 HTTP 响应")
+            val headerStr = raw.copyOfRange(0, sepPos).toString(Charsets.UTF_8)
+            var bodyBytes = raw.copyOfRange(sepPos + 4, raw.size)
+            val lines = headerStr.split("\r\n")
+            val statusCode = lines.getOrElse(0) { "" }.split(" ").getOrNull(1)?.toInt() ?: 0
+            val headers = lines.drop(1).associate { line ->
+                val idx = line.indexOf(':')
+                if (idx > 0) line.substring(0, idx).trim().lowercase() to line.substring(idx + 1).trim()
+                else "" to ""
+            }
+            if (headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true) {
+                bodyBytes = decodeChunked(bodyBytes)
+            }
+            return RawResponse(statusCode, headers, bodyBytes)
+        }
+
         /**
-         * Direct HTTPS via raw SSLSocket — completely bypasses HttpsURLConnection / OkHttp.
+         * Plain HTTP request to xboard on port 8080.
          *
-         * Why previous SSLSocketFactory approach failed:
-         *   After our factory's createSocket() returns, Android's OkHttp calls
-         *   Conscrypt.setHostname(socket, url.host) where url.host is the IP string
-         *   ("172.67.221.198"). TLS spec disallows IP literals as SNI, so Conscrypt
-         *   sends no SNI → Cloudflare immediately responds with HANDSHAKE_FAILURE.
+         * HTTPS via Cloudflare IPs is impossible from China: GFW strips the SNI extension
+         * from TLS ClientHello, causing Cloudflare to send HANDSHAKE_FAILURE immediately.
+         * Multiple approaches (custom SSLSocketFactory, raw SSLSocket) all fail for the
+         * same reason — the fix must be at the network level, not the SSL library level.
          *
-         * This function never touches HttpsURLConnection or OkHttp. It creates the
-         * SSLSocket directly, passing XBOARD_HOST as peerHost so Conscrypt puts
-         * "13141069.xyz" in the SNI extension — same as `openssl s_client -servername`.
+         * Solution: xboard's Docker container is exposed on 0.0.0.0:8080, directly reachable
+         * from the internet. Plain HTTP on port 8080 to the server IP bypasses Cloudflare,
+         * TLS, SNI, and GFW SNI stripping entirely.
          */
-        private fun directHttps(
-            ip: String,
+        private fun httpApiRequest(
             method: String,
             path: String,
             reqHeaders: Map<String, String> = emptyMap(),
             body: ByteArray? = null
-        ): RawResponse {
-            // TCP to hardcoded IP — bypasses polluted DNS
-            val tcp = Socket()
-            tcp.connect(InetSocketAddress(InetAddress.getByName(ip), 443), 8000)
-            tcp.soTimeout = 15000
+        ): Pair<Int, String> {
+            val socket = Socket()
+            socket.connect(InetSocketAddress(InetAddress.getByName(XBOARD_IP), XBOARD_API_PORT), 8000)
+            socket.soTimeout = 15000
 
-            // SSLSocket with XBOARD_HOST as peerHost → SNI = "13141069.xyz"
-            // No OkHttp in this path, nothing can override our SNI.
-            val ssl = SSLContext.getDefault().socketFactory
-                .createSocket(tcp, XBOARD_HOST, 443, true) as SSLSocket
-            ssl.startHandshake()
-
-            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(XBOARD_HOST, ssl.session)) {
-                ssl.close()
-                throw SSLHandshakeException("证书验证失败: $XBOARD_HOST")
-            }
-
-            // Write HTTP/1.1 request
-            val out = ssl.outputStream
+            val out = socket.outputStream
             val req = buildString {
                 append("$method $path HTTP/1.1\r\n")
                 append("Host: $XBOARD_HOST\r\n")
@@ -106,36 +120,50 @@ class SetupActivity : AppCompatActivity() {
             body?.let { out.write(it) }
             out.flush()
 
-            // Read full raw response (connection closes after body)
+            val raw = socket.inputStream.readBytes()
+            socket.close()
+            val r = parseRawHttp(raw)
+            return r.code to r.body.toString(Charsets.UTF_8)
+        }
+
+        /** HTTPS via raw SSLSocket — used only for WebView (register page). */
+        private fun directHttps(
+            ip: String,
+            method: String,
+            path: String,
+            reqHeaders: Map<String, String> = emptyMap(),
+            body: ByteArray? = null
+        ): RawResponse {
+            val tcp = Socket()
+            tcp.connect(InetSocketAddress(InetAddress.getByName(ip), 443), 8000)
+            tcp.soTimeout = 15000
+            val ssl = SSLContext.getDefault().socketFactory
+                .createSocket(tcp, XBOARD_HOST, 443, true) as SSLSocket
+            ssl.startHandshake()
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(XBOARD_HOST, ssl.session)) {
+                ssl.close()
+                throw SSLHandshakeException("证书验证失败: $XBOARD_HOST")
+            }
+            val out = ssl.outputStream
+            val req = buildString {
+                append("$method $path HTTP/1.1\r\n")
+                append("Host: $XBOARD_HOST\r\n")
+                append("Accept: application/json\r\n")
+                append("Accept-Encoding: identity\r\n")
+                append("Connection: close\r\n")
+                reqHeaders.forEach { (k, v) -> append("$k: $v\r\n") }
+                if (body != null) {
+                    append("Content-Type: application/json\r\n")
+                    append("Content-Length: ${body.size}\r\n")
+                }
+                append("\r\n")
+            }
+            out.write(req.toByteArray(Charsets.UTF_8))
+            body?.let { out.write(it) }
+            out.flush()
             val raw = ssl.inputStream.readBytes()
             ssl.close()
-
-            // Locate \r\n\r\n separating headers from body
-            var sepPos = -1
-            for (i in 0..raw.size - 4) {
-                if (raw[i] == 13.toByte() && raw[i+1] == 10.toByte() &&
-                    raw[i+2] == 13.toByte() && raw[i+3] == 10.toByte()) {
-                    sepPos = i; break
-                }
-            }
-            if (sepPos < 0) throw Exception("无效 HTTP 响应")
-
-            val headerStr = raw.copyOfRange(0, sepPos).toString(Charsets.UTF_8)
-            var bodyBytes = raw.copyOfRange(sepPos + 4, raw.size)
-
-            val lines = headerStr.split("\r\n")
-            val statusCode = lines.getOrElse(0) { "" }.split(" ").getOrNull(1)?.toInt() ?: 0
-            val headers = lines.drop(1).associate { line ->
-                val idx = line.indexOf(':')
-                if (idx > 0) line.substring(0, idx).trim().lowercase() to line.substring(idx + 1).trim()
-                else "" to ""
-            }
-
-            if (headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true) {
-                bodyBytes = decodeChunked(bodyBytes)
-            }
-
-            return RawResponse(statusCode, headers, bodyBytes)
+            return parseRawHttp(raw)
         }
 
         private fun decodeChunked(data: ByteArray): ByteArray {
@@ -157,23 +185,6 @@ class SetupActivity : AppCompatActivity() {
             return out.toByteArray()
         }
 
-        fun apiRequest(
-            method: String,
-            path: String,
-            reqHeaders: Map<String, String> = emptyMap(),
-            body: ByteArray? = null
-        ): Pair<Int, String> {
-            var last: Exception = Exception("连接失败，请检查网络")
-            for (ip in CF_FALLBACK_IPS) {
-                try {
-                    val r = directHttps(ip, method, path, reqHeaders, body)
-                    return r.code to r.body.toString(Charsets.UTF_8)
-                } catch (e: Exception) {
-                    last = e
-                }
-            }
-            throw last
-        }
     }
 
     private var useUrlMode = false
@@ -214,7 +225,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.8 · $XBOARD_HOST"
+            text = "v1.0.9 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -364,8 +375,8 @@ class SetupActivity : AppCompatActivity() {
                 put("password", password)
             }.toString().toByteArray(Charsets.UTF_8)
 
-            val (code, resp) = apiRequest("POST", "/api/v1/passport/auth/login", body = bodyBytes)
-            if (code != 200) throw Exception("登录失败，请检查邮箱和密码")
+            val (code, resp) = httpApiRequest("POST", "/api/v1/passport/auth/login", body = bodyBytes)
+            if (code != 200) throw Exception("登录失败，请检查邮箱和密码 (HTTP $code)")
 
             val data = JSONObject(resp).optJSONObject("data")
                 ?: throw Exception("登录响应格式错误")
@@ -377,11 +388,11 @@ class SetupActivity : AppCompatActivity() {
 
     private suspend fun getSubscriptionUrl(token: String): String =
         withContext(Dispatchers.IO) {
-            val (code, resp) = apiRequest(
+            val (code, resp) = httpApiRequest(
                 "GET", "/api/v1/user/getSubscribe",
                 reqHeaders = mapOf("Authorization" to token)
             )
-            if (code != 200) throw Exception("获取订阅失败")
+            if (code != 200) throw Exception("获取订阅失败 (HTTP $code)")
 
             val data = JSONObject(resp).optJSONObject("data")
                 ?: throw Exception("订阅响应格式错误")
