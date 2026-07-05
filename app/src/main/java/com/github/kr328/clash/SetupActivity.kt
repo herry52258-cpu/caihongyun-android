@@ -81,22 +81,15 @@ class SetupActivity : AppCompatActivity() {
             return conn
         }
 
-        // 先走正常域名，超时则轮询 Cloudflare 硬编码 IP
+        // 直接用硬编码 Cloudflare IP，完全跳过系统 DNS（防污染）
         fun openApiConnection(path: String): HttpURLConnection {
-            try {
-                val conn = URL("$XBOARD_BASE$path").openConnection() as HttpURLConnection
-                conn.connectTimeout = 6000
-                conn.readTimeout = 15000
-                return conn
-            } catch (_: Exception) {}
-            // DNS 解析失败，改用硬编码 IP
-            var last: Exception = Exception("连接失败")
+            var last: Exception = Exception("连接失败，请检查网络")
             for (ip in CF_FALLBACK_IPS) {
                 try {
-                    val conn = openConnection(ip, path)
-                    conn.connectTimeout = 8000
-                    conn.readTimeout = 15000
-                    return conn
+                    return openConnection(ip, path).also {
+                        it.connectTimeout = 8000
+                        it.readTimeout = 15000
+                    }
                 } catch (e: Exception) { last = e }
             }
             throw last
