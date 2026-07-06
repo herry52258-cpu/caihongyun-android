@@ -6,7 +6,8 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.view.Gravity
-import android.webkit.*
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -22,7 +23,6 @@ import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import javax.net.ssl.*
 
 class SetupActivity : AppCompatActivity() {
 
@@ -46,8 +46,6 @@ class SetupActivity : AppCompatActivity() {
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
         const val XBOARD_IP = "67.215.237.125"
         const val XBOARD_API_PORT = 8080
-        // Cloudflare IPs still used for WebView HTTPS (registration page)
-        val CF_FALLBACK_IPS = listOf("172.67.221.198", "104.21.78.130", XBOARD_IP)
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -124,46 +122,6 @@ class SetupActivity : AppCompatActivity() {
             socket.close()
             val r = parseRawHttp(raw)
             return r.code to r.body.toString(Charsets.UTF_8)
-        }
-
-        /** HTTPS via raw SSLSocket — used only for WebView (register page). */
-        private fun directHttps(
-            ip: String,
-            method: String,
-            path: String,
-            reqHeaders: Map<String, String> = emptyMap(),
-            body: ByteArray? = null
-        ): RawResponse {
-            val tcp = Socket()
-            tcp.connect(InetSocketAddress(InetAddress.getByName(ip), 443), 8000)
-            tcp.soTimeout = 15000
-            val ssl = SSLContext.getDefault().socketFactory
-                .createSocket(tcp, XBOARD_HOST, 443, true) as SSLSocket
-            ssl.startHandshake()
-            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(XBOARD_HOST, ssl.session)) {
-                ssl.close()
-                throw SSLHandshakeException("证书验证失败: $XBOARD_HOST")
-            }
-            val out = ssl.outputStream
-            val req = buildString {
-                append("$method $path HTTP/1.1\r\n")
-                append("Host: $XBOARD_HOST\r\n")
-                append("Accept: application/json\r\n")
-                append("Accept-Encoding: identity\r\n")
-                append("Connection: close\r\n")
-                reqHeaders.forEach { (k, v) -> append("$k: $v\r\n") }
-                if (body != null) {
-                    append("Content-Type: application/json\r\n")
-                    append("Content-Length: ${body.size}\r\n")
-                }
-                append("\r\n")
-            }
-            out.write(req.toByteArray(Charsets.UTF_8))
-            body?.let { out.write(it) }
-            out.flush()
-            val raw = ssl.inputStream.readBytes()
-            ssl.close()
-            return parseRawHttp(raw)
         }
 
         private fun decodeChunked(data: ByteArray): ByteArray {
@@ -409,33 +367,13 @@ class SetupActivity : AppCompatActivity() {
             setSupportZoom(false)
         }
         wv.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(
-                view: WebView,
-                request: WebResourceRequest
-            ): WebResourceResponse? {
-                val host = request.url.host ?: return null
-                if (!host.contains(XBOARD_HOST)) return null
-                return try {
-                    val path = request.url.path ?: "/"
-                    val query = request.url.query
-                    val fullPath = if (query != null) "$path?$query" else path
-                    val filtered = request.requestHeaders
-                        .filter { (k, _) -> !k.equals("Host", ignoreCase = true) }
-                    val r = directHttps(CF_FALLBACK_IPS[0], request.method, fullPath, filtered)
-                    val ct = r.headers["content-type"] ?: "text/html"
-                    val mime = ct.split(";").firstOrNull()?.trim() ?: "text/html"
-                    val charset = ct.split(";")
-                        .firstOrNull { it.trim().startsWith("charset") }
-                        ?.split("=")?.getOrNull(1)?.trim() ?: "utf-8"
-                    WebResourceResponse(mime, charset, r.body.inputStream())
-                } catch (_: Exception) { null }
-            }
-
             override fun onPageFinished(view: WebView, url: String) {
-                if (url.contains("/login") || url.contains("/#/")) showLoginMode()
+                // 注册完成后 xboard 跳转到登录页，回到 app 登录界面
+                if (url.contains("/#/login")) showLoginMode()
             }
         }
-        wv.loadUrl("$XBOARD_BASE/#/register")
+        // 直连服务器 IP:8080（HTTP），绕过 GFW SNI 拦截
+        wv.loadUrl("http://$XBOARD_IP:$XBOARD_API_PORT/#/register")
         setContentView(wv)
     }
 
