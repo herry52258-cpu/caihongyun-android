@@ -172,6 +172,30 @@ class MainActivity : BaseActivity<MainDesign>() {
         setupShortcuts()
     }
 
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menu.add(0, MENU_SWITCH_ACCOUNT, 0, "切换账号")
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == MENU_SWITCH_ACCOUNT) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("切换账号")
+                .setMessage("确定要退出当前账号？")
+                .setPositiveButton("确定") { _, _ ->
+                    stopClashService()
+                    getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().remove(SetupActivity.KEY_SUBSCRIPTION_URL).apply()
+                    startActivity(Intent(this, SetupActivity::class.java))
+                    finish()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return true
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
     private fun setupShortcuts() {
         // Skip dynamic shortcut setup when the app icon is hidden.
         if (uiStore.hideAppIcon) return
@@ -217,5 +241,9 @@ class MainActivity : BaseActivity<MainDesign>() {
             .build()
 
         ShortcutManagerCompat.setDynamicShortcuts(this, listOf(toggle, start, stop))
+    }
+
+    companion object {
+        private const val MENU_SWITCH_ACCOUNT = 1001
     }
 }
