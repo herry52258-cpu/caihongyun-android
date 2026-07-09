@@ -184,7 +184,7 @@ class MainActivity : BaseActivity<MainDesign>() {
                 .setMessage("确定要退出当前账号？")
                 .setPositiveButton("确定") { _, _ ->
                     stopClashService()
-                    getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
+                    getSharedPreferences(SetupActivity.PREFS_NAME, android.content.Context.MODE_PRIVATE)
                         .edit().remove(SetupActivity.KEY_SUBSCRIPTION_URL).apply()
                     startActivity(Intent(this, SetupActivity::class.java))
                     finish()
