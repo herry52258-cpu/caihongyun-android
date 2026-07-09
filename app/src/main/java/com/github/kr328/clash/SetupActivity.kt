@@ -171,7 +171,7 @@ class SetupActivity : AppCompatActivity() {
         }
 
         layout.addView(TextView(this).apply {
-            text = "🌈 彩虹云"
+            text = "🌈 彩虹猫"
             textSize = 28f
             gravity = Gravity.CENTER
         })
@@ -272,7 +272,7 @@ class SetupActivity : AppCompatActivity() {
             layout.addView(TextView(this).apply { text = "订阅链接" })
             layout.addView(urlInput)
             layout.addView(TextView(this).apply {
-                text = "可从管理员或彩虹云群里获取订阅链接"
+                text = "可从管理员或彩虹猫群里获取订阅链接"
                 textSize = 12f
                 setTextColor(0xFF888888.toInt())
                 setPadding(0, (8 * dp).toInt(), 0, 0)
@@ -400,7 +400,7 @@ class SetupActivity : AppCompatActivity() {
 
             // Create a File-type profile — ClashMeta reads local file, no HTTP request
             val uuid = withProfile {
-                create(type = Profile.Type.File, name = "彩虹云订阅", source = "")
+                create(type = Profile.Type.File, name = "彩虹猫订阅", source = "")
             }
 
             // Write subscription YAML into ClashMeta's pending directory
