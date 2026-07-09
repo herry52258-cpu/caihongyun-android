@@ -39,12 +39,12 @@ class SetupActivity : AppCompatActivity() {
     companion object {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
-        const val XBOARD_HOST = "13141069.xyz"
+        const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
         // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
-        const val XBOARD_IP = "67.215.237.125"
+        const val XBOARD_IP = "5.253.38.67"
         const val XBOARD_API_PORT = 8080
 
         fun isSetupDone(context: Context): Boolean {
@@ -183,7 +183,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.11 · $XBOARD_HOST"
+            text = "v1.0.12 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
