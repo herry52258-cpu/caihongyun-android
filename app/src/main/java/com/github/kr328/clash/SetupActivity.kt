@@ -91,7 +91,7 @@ class SetupActivity : AppCompatActivity() {
          * from the internet. Plain HTTP on port 8080 to the server IP bypasses Cloudflare,
          * TLS, SNI, and GFW SNI stripping entirely.
          */
-        private fun httpApiRequest(
+        fun httpApiRequest(
             method: String,
             path: String,
             reqHeaders: Map<String, String> = emptyMap(),
@@ -184,7 +184,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.15 · $XBOARD_HOST"
+            text = "v1.0.16 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())

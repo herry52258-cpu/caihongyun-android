@@ -65,6 +65,11 @@
             android:exported="true"
             android:label="彩虹猫"
             android:launchMode="singleTask" />
+        <activity
+            android:name=".PurchaseActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="开通会员" />
         <activity-alias
             android:name=".MainActivityAlias"
             android:exported="true"

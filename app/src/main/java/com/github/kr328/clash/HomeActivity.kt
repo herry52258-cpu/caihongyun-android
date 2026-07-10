@@ -139,7 +139,7 @@ class HomeActivity : AppCompatActivity() {
             text = "升级 ›"; setTextColor(Color.WHITE); textSize = 13f; setTypeface(typeface, android.graphics.Typeface.BOLD)
             background = gradientPill(12, intArrayOf(0xFFff2d6e.toInt(), 0xFFff8a3c.toInt()))
             setPadding(dp(15), dp(8), dp(15), dp(8))
-            setOnClickListener { openWeb("http://${SetupActivity.XBOARD_IP}:${SetupActivity.XBOARD_API_PORT}/#/plan") }
+            setOnClickListener { startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java)) }
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         col.addView(subBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(11) })
 
@@ -299,11 +299,11 @@ class HomeActivity : AppCompatActivity() {
         pm.menu.add(0, 5, 4, "关于")
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
-                1 -> openWeb("http://${SetupActivity.XBOARD_IP}:${SetupActivity.XBOARD_API_PORT}/#/plan")
+                1 -> startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.15 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v1.0.16 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
