@@ -256,13 +256,18 @@ class PurchaseActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val auth = mapOf("Authorization" to token!!)
-                val saveBody = JSONObject().apply { put("plan_id", p.id); put("period", p.period) }
-                    .toString().toByteArray(Charsets.UTF_8)
-                val (sc, sr) = withContext(Dispatchers.IO) {
-                    SetupActivity.httpApiRequest("POST", "/api/v1/user/order/save", auth, saveBody)
+                fun saveReq(): Pair<Int, String> = SetupActivity.httpApiRequest("POST", "/api/v1/user/order/save",
+                    auth, JSONObject().apply { put("plan_id", p.id); put("period", p.period) }.toString().toByteArray(Charsets.UTF_8))
+                var res = withContext(Dispatchers.IO) { saveReq() }
+                var sj = JSONObject(res.second)
+                // 有未付款/开通中的旧订单 -> 自动取消后重下单
+                val msg = sj.optString("message")
+                if (res.first != 200 && (msg.contains("未付") || msg.contains("开通中") || msg.contains("pending", true) || msg.contains("unpaid", true))) {
+                    cancelPending(auth)
+                    res = withContext(Dispatchers.IO) { saveReq() }
+                    sj = JSONObject(res.second)
                 }
-                val sj = JSONObject(sr)
-                if (sc != 200) { toast(sj.optString("message", "下单失败")); return@launch }
+                if (res.first != 200) { toast(sj.optString("message", "下单失败")); return@launch }
                 val tradeNo = sj.opt("data")?.toString() ?: run { toast("下单失败"); return@launch }
 
                 val coBody = JSONObject().apply { put("trade_no", tradeNo); put("method", pay.id) }
@@ -283,6 +288,22 @@ class PurchaseActivity : AppCompatActivity() {
                 ctaBtn.isEnabled = true; selected?.let { ctaBtn.text = "立即开通 · ${yuan(it.price)} ${it.periodLabel}" }
             }
         }
+    }
+
+    // 取消该用户所有未付款订单(status=0)
+    private suspend fun cancelPending(auth: Map<String, String>) {
+        try {
+            val (c, r) = withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("GET", "/api/v1/user/order/fetch", auth) }
+            if (c != 200) return
+            val arr = JSONObject(r).optJSONArray("data") ?: return
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.optInt("status", -1) == 0) {
+                    val body = JSONObject().apply { put("trade_no", o.optString("trade_no")) }.toString().toByteArray(Charsets.UTF_8)
+                    withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("POST", "/api/v1/user/order/cancel", auth, body) }
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     // ---------- payment webview ----------
