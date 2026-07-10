@@ -70,6 +70,11 @@
             android:configChanges="uiMode"
             android:exported="false"
             android:label="开通会员" />
+        <activity
+            android:name=".InviteActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="邀请好友" />
         <activity-alias
             android:name=".MainActivityAlias"
             android:exported="true"

@@ -143,6 +143,17 @@ class HomeActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         col.addView(subBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(11) })
 
+        // 邀请好友返利入口
+        val inviteBar = TextView(this).apply {
+            text = "🎁 邀请好友注册，拉新得返利 ›"
+            setTextColor(Color.parseColor("#e0b3ff")); textSize = 13.5f
+            setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = Gravity.CENTER
+            background = rounded(0x14FFFFFF, 13, 1, 0x40c433ff.toInt())
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            setOnClickListener { startActivity(Intent(this@HomeActivity, InviteActivity::class.java)) }
+        }
+        col.addView(inviteBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(9) })
+
         // stage: ring + cat
         val stage = FrameLayout(this)
         ring = ImageView(this).apply { setImageResource(R.drawable.ring_rainbow); alpha = 0f }
@@ -294,17 +305,19 @@ class HomeActivity : AppCompatActivity() {
     private fun showMenu(anchor: View) {
         val pm = PopupMenu(this, anchor)
         pm.menu.add(0, 1, 0, "购买 / 我的订阅")
-        pm.menu.add(0, 2, 1, "复制订阅链接")
-        pm.menu.add(0, 3, 2, "高级设置")
-        pm.menu.add(0, 4, 3, "切换账号")
-        pm.menu.add(0, 5, 4, "关于")
+        pm.menu.add(0, 6, 1, "🎁 邀请好友返利")
+        pm.menu.add(0, 2, 2, "复制订阅链接")
+        pm.menu.add(0, 3, 3, "高级设置")
+        pm.menu.add(0, 4, 4, "切换账号")
+        pm.menu.add(0, 5, 5, "关于")
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
+                6 -> startActivity(Intent(this@HomeActivity, InviteActivity::class.java))
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.20 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v1.0.21 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
