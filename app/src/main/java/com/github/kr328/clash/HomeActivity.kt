@@ -221,7 +221,8 @@ class HomeActivity : AppCompatActivity() {
             } catch (_: Exception) {}
             statusMain.text = "● 已连接"
             statusMain.setTextColor(Color.parseColor("#22e08a"))
-            statusSub.text = if (node.isNotEmpty()) "节点：$node" else "已连接"
+            statusSub.text = if (node.isNotEmpty()) "节点：${nf(node)}" else "已连接"
+            if (node.isNotEmpty()) nodeName.text = nf(node)
             cat.alpha = 1f
             ring.alpha = 1f
             if (!ringAnim.isStarted) ringAnim.start()
@@ -271,7 +272,7 @@ class HomeActivity : AppCompatActivity() {
                 if (proxies.isEmpty()) { toast("暂无可选节点"); return@launch }
                 val labels = proxies.map { p ->
                     val d = if (p.delay in 1..9999) "  ${p.delay}ms" else ""
-                    (if (p.name == group.now) "✓ " else "   ") + p.name + d
+                    (if (p.name == group.now) "✓ " else "   ") + nf(p.name) + d
                 }.toTypedArray()
                 AlertDialog.Builder(this@HomeActivity)
                     .setTitle("选择节点")
@@ -279,7 +280,7 @@ class HomeActivity : AppCompatActivity() {
                         lifecycleScope.launch {
                             try {
                                 withClash { patchSelector(g, proxies[which].name) }
-                                nodeName.text = proxies[which].name
+                                nodeName.text = nf(proxies[which].name)
                             } catch (_: Exception) { toast("切换失败") }
                         }
                     }
@@ -303,7 +304,7 @@ class HomeActivity : AppCompatActivity() {
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.18 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v1.0.19 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
@@ -358,6 +359,24 @@ class HomeActivity : AppCompatActivity() {
         // 复用同一个轮询协程（读取字段，buildLayout 已重新赋值视图引用）
         setContentView(buildLayout())
     }
+
+    // 节点名前加国旗，好区分又好看
+    private fun flagFor(name: String): String = when {
+        name.contains("美国") || name.contains("洛杉矶") || name.contains("弗吉尼亚") || name.contains("硅谷") || name.contains("US", true) -> "🇺🇸"
+        name.contains("日本") || name.contains("东京") || name.contains("大阪") || name.contains("JP", true) -> "🇯🇵"
+        name.contains("香港") || name.contains("HK", true) -> "🇭🇰"
+        name.contains("新加坡") || name.contains("狮城") || name.contains("SG", true) -> "🇸🇬"
+        name.contains("韩国") || name.contains("首尔") || name.contains("KR", true) -> "🇰🇷"
+        name.contains("台湾") || name.contains("台北") || name.contains("TW", true) -> "🇹🇼"
+        name.contains("英国") || name.contains("伦敦") || name.contains("UK", true) -> "🇬🇧"
+        name.contains("德国") || name.contains("DE", true) -> "🇩🇪"
+        name.contains("自动") -> "🎯"
+        name.contains("故障") || name.contains("转移") -> "🔀"
+        name.contains("直连") || name.contains("DIRECT", true) -> "🏠"
+        name.contains("拒绝") || name.contains("REJECT", true) -> "🚫"
+        else -> "🌐"
+    }
+    private fun nf(name: String) = "${flagFor(name)} $name"
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }
