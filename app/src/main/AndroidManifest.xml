@@ -59,10 +59,16 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".HomeActivity"
+            android:configChanges="uiMode"
+            android:exported="true"
+            android:label="彩虹猫"
+            android:launchMode="singleTask" />
         <activity-alias
             android:name=".MainActivityAlias"
             android:exported="true"
-            android:targetActivity=".MainActivity">
+            android:targetActivity=".HomeActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -32,13 +32,14 @@ class SetupActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             startClashService()
         }
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, HomeActivity::class.java))
         finish()
     }
 
     companion object {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
+        const val KEY_AUTH_TOKEN = "auth_token"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
@@ -183,7 +184,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.13 · $XBOARD_HOST"
+            text = "v1.0.14 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -321,7 +322,7 @@ class SetupActivity : AppCompatActivity() {
             vpnPermissionLauncher.launch(vpnRequest)
         } else {
             startClashService()
-            startActivity(Intent(this, MainActivity::class.java))
+            startActivity(Intent(this, HomeActivity::class.java))
             finish()
         }
     }
@@ -340,6 +341,10 @@ class SetupActivity : AppCompatActivity() {
                 ?: throw Exception("登录响应格式错误")
             val token = data.optString("auth_data", "")
             if (token.isEmpty()) throw Exception("获取 token 失败")
+
+            // 存 token,供 App 内购买/面板网页自动登录(cookie access_token)
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putString(KEY_AUTH_TOKEN, token).apply()
 
             getSubscriptionUrl(token)
         }
