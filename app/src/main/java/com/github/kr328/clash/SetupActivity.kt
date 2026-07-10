@@ -42,6 +42,8 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_AUTH_TOKEN = "auth_token"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
+        // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
+        const val XBOARD_PANEL_DOMAIN = "my.caihongmao.org"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
         // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
@@ -96,6 +98,44 @@ class SetupActivity : AppCompatActivity() {
             path: String,
             reqHeaders: Map<String, String> = emptyMap(),
             body: ByteArray? = null
+        ): Pair<Int, String> {
+            // 双通道：优先 Cloudflare 域名 HTTPS（能开 caihongmao.org 的用户最稳），
+            // TLS/连接失败（GFW 剥 SNI 等）再回退直连 IP:8080 裸 HTTP。
+            // 只在“连接层失败”时回退；拿到任何 HTTP 状态码（含 4xx）即视为通道可用。
+            return try {
+                httpsCfRequest(method, path, reqHeaders, body)
+            } catch (e: Exception) {
+                rawIpRequest(method, path, reqHeaders, body)
+            }
+        }
+
+        private fun httpsCfRequest(
+            method: String, path: String,
+            reqHeaders: Map<String, String>, body: ByteArray?
+        ): Pair<Int, String> {
+            val conn = java.net.URL("https://$XBOARD_PANEL_DOMAIN$path")
+                .openConnection() as javax.net.ssl.HttpsURLConnection
+            conn.requestMethod = method
+            conn.connectTimeout = 7000
+            conn.readTimeout = 12000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("Accept", "application/json")
+            reqHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body) }
+            }
+            val code = conn.responseCode   // 抛异常=连接层失败=回退 IP
+            val stream = if (code in 200..399) conn.inputStream else conn.errorStream
+            val text = (stream?.readBytes() ?: ByteArray(0)).toString(Charsets.UTF_8)
+            conn.disconnect()
+            return code to text
+        }
+
+        private fun rawIpRequest(
+            method: String, path: String,
+            reqHeaders: Map<String, String>, body: ByteArray?
         ): Pair<Int, String> {
             val socket = Socket()
             socket.connect(InetSocketAddress(InetAddress.getByName(XBOARD_IP), XBOARD_API_PORT), 8000)
@@ -184,7 +224,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.16 · $XBOARD_HOST"
+            text = "v1.0.17 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
