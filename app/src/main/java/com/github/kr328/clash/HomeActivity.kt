@@ -304,7 +304,7 @@ class HomeActivity : AppCompatActivity() {
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.19 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v1.0.20 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }

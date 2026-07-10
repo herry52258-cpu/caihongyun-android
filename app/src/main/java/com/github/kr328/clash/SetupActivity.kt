@@ -28,10 +28,8 @@ class SetupActivity : AppCompatActivity() {
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            startClashService()
-        }
+    ) { _ ->
+        // 已授予 VPN 权限，但不自动连接：进主页保持断开，由用户手动点"一键连接"
         startActivity(Intent(this, HomeActivity::class.java))
         finish()
     }
@@ -224,7 +222,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.19 · $XBOARD_HOST"
+            text = "v1.0.20 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -361,7 +359,7 @@ class SetupActivity : AppCompatActivity() {
         if (vpnRequest != null) {
             vpnPermissionLauncher.launch(vpnRequest)
         } else {
-            startClashService()
+            // 不自动连接：登录后进主页保持断开，用户手动点"一键连接"
             startActivity(Intent(this, HomeActivity::class.java))
             finish()
         }
