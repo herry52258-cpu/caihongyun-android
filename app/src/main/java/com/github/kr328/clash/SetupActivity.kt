@@ -222,7 +222,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.21 · $XBOARD_HOST"
+            text = "v1.0.22 · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())
@@ -415,8 +415,8 @@ class SetupActivity : AppCompatActivity() {
                 if (url.contains("/#/login")) showLoginMode()
             }
         }
-        // 直连服务器 IP:8080（HTTP），绕过 GFW SNI 拦截
-        wv.loadUrl("http://$XBOARD_IP:$XBOARD_API_PORT/#/register")
+        // 走 Cloudflare 域名（IP:8080 会被 GFW 间歇拦截导致空白页）
+        wv.loadUrl("https://$XBOARD_PANEL_DOMAIN/#/register")
         setContentView(wv)
     }
 

@@ -316,6 +316,19 @@ class PurchaseActivity : AppCompatActivity() {
                     handleUrl(request.url.toString())
                 @Deprecated("compat")
                 override fun shouldOverrideUrlLoading(view: WebView, u: String): Boolean = handleUrl(u)
+                override fun onPageFinished(view: WebView, u: String) {
+                    // 网关无匹配通道时会返回 JSON 错误(如大额支付宝超限) -> 友好提示改用微信
+                    view.evaluateJavascript(
+                        "(document.body?document.body.innerText:'').slice(0,300)"
+                    ) { r ->
+                        if (r != null && (r.contains("没有找到符合金额") || r.contains("支付通道"))) {
+                            runOnUiThread {
+                                toast("该金额支付宝暂不支持，请返回改用【微信支付】")
+                                closeWeb()
+                            }
+                        }
+                    }
+                }
             }
             loadUrl(url)
         }
