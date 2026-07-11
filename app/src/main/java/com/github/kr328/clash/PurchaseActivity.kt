@@ -242,13 +242,22 @@ class PurchaseActivity : AppCompatActivity() {
     }
 
     // ---------- buy ----------
+    // 支付通道单笔限额(分)：支付宝 ¥1-300，微信 ¥1-1000。超限的通道会返回"没有找到符合金额要求的支付通道"
+    private fun payMax(name: String): Int = when {
+        name.contains("支付宝") -> 30000
+        name.contains("微信") -> 100000
+        else -> Int.MAX_VALUE
+    }
+
     private fun onBuy() {
         val p = selected ?: run { toast("请选择套餐"); return }
         if (payments.isEmpty()) { toast("暂无可用支付方式"); return }
-        if (payments.size == 1) { doOrder(p, payments[0]) ; return }
-        val names = payments.map { it.name }.toTypedArray()
+        // 按金额过滤可用支付方式；若全部超限则兜底显示全部
+        val avail = payments.filter { p.price <= payMax(it.name) }.ifEmpty { payments }
+        if (avail.size == 1) { doOrder(p, avail[0]) ; return }
+        val names = avail.map { it.name }.toTypedArray()
         AlertDialog.Builder(this).setTitle("选择支付方式")
-            .setItems(names) { _, w -> doOrder(p, payments[w]) }.show()
+            .setItems(names) { _, w -> doOrder(p, avail[w]) }.show()
     }
 
     private fun doOrder(p: PlanItem, pay: PayItem) {
