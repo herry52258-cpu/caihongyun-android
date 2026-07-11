@@ -203,12 +203,13 @@ class PurchaseActivity : AppCompatActivity() {
                 "month_price" to "/月", "quarter_price" to "/季", "half_year_price" to "/半年",
                 "year_price" to "/年", "two_year_price" to "/2年", "three_year_price" to "/3年", "onetime_price" to "/永久"
             )
+            // 阶梯套餐一个 plan 有多个周期价，每个非零周期都生成一张卡(不能 break)
             for ((key, label) in periods) {
                 if (!o.isNull(key)) {
                     val price = o.getInt(key)
+                    if (price <= 0) continue
                     val orig = if (key == "onetime_price" && price == 99900) 199900 else null
                     plans.add(PlanItem(id, name, content, price, key, label, orig))
-                    break
                 }
             }
         }
