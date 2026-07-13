@@ -409,10 +409,32 @@ class SetupActivity : AppCompatActivity() {
             domStorageEnabled = true
             setSupportZoom(false)
         }
+        var handled = false
+        var sawRegister = false
+        // 注册成功后 xboard 会离开 /#/register（新版是自动登录跳 /#/dashboard，旧版跳 /#/login）。
+        // 只有「先看到过注册页、随后又离开到别的面板路由」才算注册完成，避免初始加载误触发。
+        fun backToAppLoginIfDone(url: String) {
+            if (handled) return
+            if (url.contains("/register")) { sawRegister = true; return }
+            if (sawRegister && url.contains("/#/")) {   // 已离开注册页，跳到 dashboard/login 等
+                handled = true
+                runOnUiThread {
+                    android.widget.Toast.makeText(
+                        this@SetupActivity, "注册成功，请用刚注册的账号登录", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    showLoginMode()
+                }
+            }
+        }
         wv.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
-                // 注册完成后 xboard 跳转到登录页，回到 app 登录界面
-                if (url.contains("/#/login")) showLoginMode()
+                backToAppLoginIfDone(url)
+            }
+            // 关键：xboard 是 hash 路由 SPA，注册后跳 /#/dashboard 不会触发 onPageFinished，
+            // 但会触发 doUpdateVisitedHistory（history 变化），在这里捕获才可靠。
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                backToAppLoginIfDone(url)
             }
         }
         // 走 Cloudflare 域名（IP:8080 会被 GFW 间歇拦截导致空白页）
