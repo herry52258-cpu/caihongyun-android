@@ -74,6 +74,8 @@ class HomeActivity : AppCompatActivity() {
 
         setContentView(buildLayout())
         startStatePolling()
+        // 启动检查新版本（有更新弹框，可一键在线更新）
+        Updater.checkAndPrompt(this)
     }
 
     override fun onBackPressed() {
@@ -443,7 +445,8 @@ class HomeActivity : AppCompatActivity() {
         pm.menu.add(0, 2, 2, "复制订阅链接")
         pm.menu.add(0, 3, 3, "高级设置")
         pm.menu.add(0, 4, 4, "切换账号")
-        pm.menu.add(0, 5, 5, "关于")
+        pm.menu.add(0, 7, 5, "检查更新")
+        pm.menu.add(0, 5, 6, "关于")
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
@@ -451,7 +454,8 @@ class HomeActivity : AppCompatActivity() {
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.27 · ${SetupActivity.XBOARD_HOST}")
+                7 -> { toast("正在检查更新…"); Updater.checkAndPrompt(this, manual = true) }
+                5 -> toast("彩虹猫 v1.0.28 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
