@@ -24,8 +24,11 @@ import com.github.kr328.clash.util.startClashService
 import com.github.kr328.clash.util.stopClashService
 import com.github.kr328.clash.util.withClash
 import com.github.kr328.clash.util.withProfile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class HomeActivity : AppCompatActivity() {
 
@@ -48,9 +51,17 @@ class HomeActivity : AppCompatActivity() {
     private var connectStartAt = 0L
     private var selectorGroup: String? = null
     private var webOverlay: WebView? = null
+    private var trialWelcomeShown = false
+    private var expiredPromptShown = false
 
     private val density by lazy { resources.displayMetrics.density }
     private fun dp(v: Int) = (v * density).toInt()
+
+    companion object {
+        // 必须与面板 v2_settings.try_out_plan_id 一致（体验卡套餐 id）
+        private const val TRIAL_PLAN_ID = 12
+        private const val KEY_TRIAL_WELCOMED = "trial_welcomed"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +79,125 @@ class HomeActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (webOverlay != null) { closeWeb(); return }
         super.onBackPressed()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 每次回到首页刷新订阅状态（体验倒计时 / 会员到期 / 升级后立即变化）
+        refreshSubscription()
+    }
+
+    // ---------------- 订阅 / 免费体验状态 ----------------
+
+    private fun refreshSubscription() {
+        if (webOverlay != null) return
+        val token = getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(SetupActivity.KEY_AUTH_TOKEN, null)
+        if (token.isNullOrEmpty()) {
+            subStatus.text = "🎁 开通彩虹猫会员 · 解锁全部节点"
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val (c, r) = withContext(Dispatchers.IO) {
+                    SetupActivity.httpApiRequest("GET", "/api/v1/user/info", mapOf("Authorization" to token))
+                }
+                if (c != 200) return@launch
+                val d = JSONObject(r).optJSONObject("data") ?: return@launch
+                val planId = d.optInt("plan_id", 0)
+                val expired = d.optLong("expired_at", 0L)          // 秒；null/0 = 无到期
+                val total = d.optLong("transfer_enable", 0L)
+                val used = d.optLong("u", 0L) + d.optLong("d", 0L)
+                val now = System.currentTimeMillis() / 1000
+                val remainSec = expired - now
+                val remainBytes = (total - used).coerceAtLeast(0)
+                val trafficUsedUp = total > 0 && used >= total
+                val remainDisplay = if (remainBytes >= 1073741824)
+                    "%.2fG".format(remainBytes / 1073741824.0)
+                    else "${remainBytes / 1048576}M"
+                val isTrial = planId == TRIAL_PLAN_ID
+
+                when {
+                    // 无有效订阅（体验已被清 / 从未开通）
+                    expired == 0L && planId == 0 -> {
+                        subStatus.text = "🎁 免费体验已结束 · 点右侧升级畅享"
+                        maybeShowExpiredPrompt(trial = true, trafficUsedUp = false)
+                    }
+                    // 时间已到期（体验/会员到点）
+                    expired != 0L && remainSec <= 0 -> {
+                        subStatus.text = if (isTrial) "⏰ 体验已结束 · 点右侧升级畅享"
+                            else "⏰ 会员已到期 · 点右侧续费"
+                        maybeShowExpiredPrompt(trial = isTrial, trafficUsedUp = false)
+                    }
+                    // 流量用完（时间没到，但用着用着断了）—— 关键转化点
+                    trafficUsedUp -> {
+                        subStatus.text = if (isTrial) "⚠️ 体验流量已用完 · 升级解锁不限速"
+                            else "⚠️ 流量已用完 · 升级/续费解锁不限速"
+                        maybeShowExpiredPrompt(trial = isTrial, trafficUsedUp = true)
+                    }
+                    // 永久会员（买断套餐 expired_at 为空但有 plan，流量未用完）
+                    expired == 0L && planId > 0 -> {
+                        subStatus.text = "👑 永久会员 · 剩 $remainDisplay 流量"
+                    }
+                    // 体验中：倒计时 + 剩余流量
+                    isTrial -> {
+                        val h = remainSec / 3600
+                        val m = (remainSec % 3600) / 60
+                        val left = if (h > 0) "${h}小时${m}分" else "${m}分钟"
+                        subStatus.text = "🎁 免费体验中 · 剩 $left · $remainDisplay"
+                        maybeShowTrialWelcome()
+                    }
+                    // 付费会员
+                    else -> {
+                        val days = remainSec / 86400
+                        subStatus.text = if (days > 3650) "👑 永久会员 · 剩 $remainDisplay 流量"
+                            else "👑 会员有效 · 剩 $days 天 · $remainDisplay"
+                    }
+                }
+            } catch (_: Exception) { /* 网络波动忽略，保留原文案 */ }
+        }
+    }
+
+    // 首启一次性：告诉新用户已获赠免费体验
+    private fun maybeShowTrialWelcome() {
+        val prefs = getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
+        if (trialWelcomeShown || prefs.getBoolean(KEY_TRIAL_WELCOMED, false)) return
+        trialWelcomeShown = true
+        prefs.edit().putBoolean(KEY_TRIAL_WELCOMED, true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("🎉 已送你 1 天免费体验")
+            .setMessage("新用户专享免费体验，全部节点畅连。\n\n点「🚀 一键连接」立即开启；体验流量用完或到期后，可随时升级会员，解锁不限速专线与更多流量。")
+            .setPositiveButton("立即体验") { di, _ -> di.dismiss() }
+            .setNegativeButton("了解会员") { _, _ ->
+                startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
+            }
+            .show()
+    }
+
+    // 到期/流量用完提醒：每次打开 app 至多提醒一次，引导升级
+    private fun maybeShowExpiredPrompt(trial: Boolean, trafficUsedUp: Boolean) {
+        if (expiredPromptShown) return
+        expiredPromptShown = true
+        val title = when {
+            trial && trafficUsedUp -> "免费体验流量已用完"
+            trial -> "免费体验已结束"
+            trafficUsedUp -> "流量已用完"
+            else -> "会员已到期"
+        }
+        val msg = when {
+            trial && trafficUsedUp -> "你的免费体验流量已用完，连接已断开。升级彩虹猫会员，畅享不限速专线、全部节点与更多流量。"
+            trial -> "你的 1 天免费体验已结束。升级彩虹猫会员，畅享不限速专线、全部节点与更多流量。"
+            trafficUsedUp -> "本期流量已用完，连接已断开。升级或续费即可恢复不限速专线。"
+            else -> "会员已到期，续费即可继续使用全部节点与不限速专线。"
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(msg)
+            .setPositiveButton("立即升级") { _, _ ->
+                startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
+            }
+            .setNegativeButton("稍后", null)
+            .show()
     }
 
     // ---------------- UI ----------------
@@ -133,7 +263,7 @@ class HomeActivity : AppCompatActivity() {
             ).apply { cornerRadius = dp(15).toFloat(); setStroke(dp(1), 0x52ff2d8c.toInt()) }
             setPadding(dp(14), dp(11), dp(12), dp(11))
         }
-        subStatus = TextView(this).apply { text = "🎁 彩虹猫会员 · 点右侧升级"; setTextColor(Color.WHITE); textSize = 13f }
+        subStatus = TextView(this).apply { text = "🎁 正在查询订阅状态…"; setTextColor(Color.WHITE); textSize = 13f }
         subBar.addView(subStatus, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         subBar.addView(TextView(this).apply {
             text = "升级 ›"; setTextColor(Color.WHITE); textSize = 13f; setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -211,8 +341,12 @@ class HomeActivity : AppCompatActivity() {
 
     private fun startStatePolling() {
         lifecycleScope.launch {
+            var tick = 1
             while (isActive) {
                 render()
+                // 约每 60 秒刷新一次订阅，连接中流量耗尽也能当场变状态并弹升级
+                if (tick % 85 == 0) refreshSubscription()
+                tick++
                 kotlinx.coroutines.delay(700)
             }
         }
@@ -317,7 +451,7 @@ class HomeActivity : AppCompatActivity() {
                 2 -> copySubscription()
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
-                5 -> toast("彩虹猫 v1.0.25 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v1.0.26 · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
