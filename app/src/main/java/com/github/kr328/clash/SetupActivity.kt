@@ -38,6 +38,8 @@ class SetupActivity : AppCompatActivity() {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
+        // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
+        const val APP_VERSION = "1.0.30"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
@@ -222,7 +224,7 @@ class SetupActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
         layout.addView(TextView(this).apply {
-            text = "v1.0.25 · $XBOARD_HOST"
+            text = "v$APP_VERSION · $XBOARD_HOST"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF888888.toInt())

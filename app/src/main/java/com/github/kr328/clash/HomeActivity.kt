@@ -455,7 +455,7 @@ class HomeActivity : AppCompatActivity() {
                 3 -> startActivity(Intent(this, MainActivity::class.java))
                 4 -> switchAccount()
                 7 -> { toast("正在检查更新…"); Updater.checkAndPrompt(this, manual = true) }
-                5 -> toast("彩虹猫 v1.0.30 · ${SetupActivity.XBOARD_HOST}")
+                5 -> toast("彩虹猫 v${SetupActivity.APP_VERSION} · ${SetupActivity.XBOARD_HOST}")
             }
             true
         }
