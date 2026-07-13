@@ -69,15 +69,16 @@ jobs:
       - name: 重命名 APK
         run: |
           mkdir -p dist
-          # 只取 universal 通用包（含 arm64-v8a + armeabi-v7a 等全部架构），
-          # 否则可能抓到纯 32 位(armeabi-v7a)包，新款纯64位手机装不上("系统不支持32位应用")
-          f=$(find app/build/outputs/apk/meta/release -name "*universal*.apk" | head -1)
+          # 取 arm64-v8a(纯64位)包 ~45MB：覆盖2015年后所有手机(含新款纯64位机)，
+          # 且不超 Telegram 机器人 50MB 上传上限。通用包102MB会超限，纯v7a(32位)新机装不上。
+          f=$(find app/build/outputs/apk/meta/release -name "*arm64-v8a*.apk" | head -1)
           if [ -z "$f" ]; then
-            echo "未找到 universal APK，回退取含 arm64 的包"
-            f=$(find app/build/outputs/apk/meta/release -name "*arm64*.apk" | head -1)
+            echo "未找到 arm64 APK，回退取 universal"
+            f=$(find app/build/outputs/apk/meta/release -name "*universal*.apk" | head -1)
           fi
           echo "选用 APK: $f"
           cp "$f" dist/彩虹云-android.apk
+          ls -lh dist/彩虹云-android.apk
           unzip -l dist/彩虹云-android.apk | grep -oE 'lib/[^/]+/' | sort -u
 
       - name: 上传 APK
