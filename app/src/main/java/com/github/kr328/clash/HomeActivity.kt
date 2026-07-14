@@ -331,7 +331,15 @@ class HomeActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val active = withProfile { queryActive() }
             if (active == null || !active.imported) {
-                toast("订阅尚未就绪，请从菜单重新登录")
+                // 无套餐/过期用户没有可用节点 profile —— 引导去开通，而不是让人一头雾水
+                AlertDialog.Builder(this@HomeActivity)
+                    .setTitle("尚无可用节点")
+                    .setMessage("你还没有有效套餐（或已到期）。开通后即可一键连接，畅享全部节点。\n\n新用户注册送 1 天免费体验。")
+                    .setPositiveButton("去开通") { _, _ ->
+                        startActivity(Intent(this@HomeActivity, PurchaseActivity::class.java))
+                    }
+                    .setNegativeButton("稍后", null)
+                    .show()
                 return@launch
             }
             connecting = true

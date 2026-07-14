@@ -346,12 +346,42 @@ class PurchaseActivity : AppCompatActivity() {
         setContentView(wv)
     }
 
-    // 回跳到订单页/我们的域名 => 视为支付流程结束，回购买页刷新状态
+    // 回跳到订单页/我们的域名 => 视为支付流程结束，回购买页并检查是否开通
     private fun handleUrl(u: String): Boolean {
         if (u.contains("/#/order") || u.contains("caihongmao.org") || u.contains("13141069.xyz")) {
-            closeWeb(); loadData(); return true
+            closeWeb(); onPaymentReturned(); return true
         }
         return false
+    }
+
+    // 付款回跳后：轮询等 EPay 回调激活订阅，一旦开通就自动重拉节点（否则"付了钱没节点"）
+    private fun onPaymentReturned() {
+        loadData()
+        val t = token ?: return
+        lifecycleScope.launch {
+            val auth = mapOf("Authorization" to t)
+            repeat(6) {
+                val (c, r) = withContext(Dispatchers.IO) {
+                    SetupActivity.httpApiRequest("GET", "/api/v1/user/info", auth)
+                }
+                val d = if (c == 200) JSONObject(r).optJSONObject("data") else null
+                if (d != null) {
+                    val expired = d.optLong("expired_at", 0L)
+                    val planId = d.optInt("plan_id", 0)
+                    val now = System.currentTimeMillis() / 1000
+                    val active = (expired == 0L && planId > 0) || expired > now
+                    if (active) {
+                        toast("🎉 开通成功，正在刷新节点…")
+                        val ok = SetupActivity.reimportNodes(this@PurchaseActivity)
+                        toast(if (ok) "✅ 节点已更新，返回首页即可一键连接"
+                              else "开通成功，请返回首页；若连不上从菜单重新登录一次")
+                        loadData()
+                        return@launch
+                    }
+                }
+                kotlinx.coroutines.delay(2500)  // 等 EPay 异步回调激活
+            }
+        }
     }
 
     private fun closeWeb() {

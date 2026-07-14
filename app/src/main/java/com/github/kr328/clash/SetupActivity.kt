@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.32"
+        const val APP_VERSION = "1.0.33"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
@@ -53,6 +53,36 @@ class SetupActivity : AppCompatActivity() {
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return !prefs.getString(KEY_SUBSCRIPTION_URL, null).isNullOrBlank()
+        }
+
+        /**
+         * 重新拉取订阅并覆盖节点配置。用于「付款开通后刷新节点」——订阅存的是静态文件，
+         * 无套餐时导入的是空配置，开通后必须重拉一次才有节点，否则"付了钱却连不上"。
+         * 返回 true=成功刷新且含真实节点；false=拉取失败或仍是空配置。
+         */
+        suspend fun reimportNodes(context: Context): Boolean = withContext(Dispatchers.IO) {
+            val url = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_SUBSCRIPTION_URL, null) ?: return@withContext false
+            val path = try {
+                val uri = java.net.URI(url)
+                uri.rawPath + if (uri.rawQuery != null) "?${uri.rawQuery}" else ""
+            } catch (e: Exception) { "/s/" + url.substringAfterLast("/s/") }
+            val (code, content) = httpApiRequest(
+                "GET", path, reqHeaders = mapOf("User-Agent" to "ClashMetaForAndroid/2.10.1")
+            )
+            if (code != 200) return@withContext false
+            // 有真实节点才导入（空配置只有 "proxies: []"，避免覆盖已有节点为空）
+            val hasNodes = content.contains("type: vless") || content.contains("type: trojan") ||
+                content.contains("type: ss") || content.contains("proxy-providers:")
+            if (!hasNodes) return@withContext false
+            val uuid = withProfile { create(type = Profile.Type.File, name = "彩虹猫订阅", source = "") }
+            context.filesDir.resolve("pending").resolve(uuid.toString())
+                .resolve("config.yaml").writeText(content)
+            withProfile {
+                commit(uuid)
+                queryByUUID(uuid)?.let { setActive(it) }
+            }
+            true
         }
 
         private data class RawResponse(val code: Int, val headers: Map<String, String>, val body: ByteArray)
@@ -462,8 +492,14 @@ class SetupActivity : AppCompatActivity() {
             )
             if (code != 200) throw Exception("获取订阅内容失败 (HTTP $code)")
             if (!content.contains("proxies:") && !content.contains("proxy-providers:")) {
-                throw Exception("订阅格式错误 (无节点数据)")
+                throw Exception("订阅格式错误")
             }
+            // 无真实节点(无套餐/试用或会员已过期)：xboard 返回的空配置里 proxy-group 引用了
+            // 未定义的组，是无效 ClashMeta 配置，导入会失败。这种情况不导入 profile，
+            // 但登录仍算成功——进首页显示订阅状态、引导用户开通套餐。开通后 reimportNodes 会补上节点。
+            val hasNodes = content.contains("type: vless") || content.contains("type: trojan") ||
+                content.contains("type: ss") || content.contains("proxy-providers:")
+            if (!hasNodes) return@withContext
 
             // Create a File-type profile — ClashMeta reads local file, no HTTP request
             val uuid = withProfile {
