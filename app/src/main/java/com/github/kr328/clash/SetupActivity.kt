@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.33"
+        const val APP_VERSION = "1.0.34"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
@@ -490,6 +490,11 @@ class SetupActivity : AppCompatActivity() {
                 "GET", path,
                 reqHeaders = mapOf("User-Agent" to "ClashMetaForAndroid/2.10.1")
             )
+            // 403/401/404 = 套餐已到期或未开通（订阅内容端点对过期账号返回 403）。
+            // 不当作故障：登录仍算成功、放行进首页，由 HomeActivity 显示
+            // 「⏰ 会员已到期 · 点右侧续费」并弹出购买引导（maybeShowExpiredPrompt）。
+            // 若在此硬报错，用户只看到「获取订阅内容失败 (HTTP 403)」，会误以为软件坏了直接卸载。
+            if (code == 403 || code == 401 || code == 404) return@withContext
             if (code != 200) throw Exception("获取订阅内容失败 (HTTP $code)")
             if (!content.contains("proxies:") && !content.contains("proxy-providers:")) {
                 throw Exception("订阅格式错误")
