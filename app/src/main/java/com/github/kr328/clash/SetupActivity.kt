@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.34"
+        const val APP_VERSION = "1.0.35"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
@@ -129,13 +129,14 @@ class SetupActivity : AppCompatActivity() {
             reqHeaders: Map<String, String> = emptyMap(),
             body: ByteArray? = null
         ): Pair<Int, String> {
-            // 双通道：优先 Cloudflare 域名 HTTPS（能开 caihongmao.org 的用户最稳），
-            // TLS/连接失败（GFW 剥 SNI 等）再回退直连 IP:8080 裸 HTTP。
+            // 双通道：优先直连 IP:8080 裸 HTTP（实测国内 0.16s 又快又稳，绕开 CF/SNI/GFW），
+            // 直连 IP 被封（连接层失败）时才回退 Cloudflare 域名 HTTPS（海外/IP被封时的备用）。
+            // 之前是 CF 优先，国内用户要干等十几秒超时才切兜底 → 续费页一直转圈；反过来即可秒开。
             // 只在“连接层失败”时回退；拿到任何 HTTP 状态码（含 4xx）即视为通道可用。
             return try {
-                httpsCfRequest(method, path, reqHeaders, body)
-            } catch (e: Exception) {
                 rawIpRequest(method, path, reqHeaders, body)
+            } catch (e: Exception) {
+                httpsCfRequest(method, path, reqHeaders, body)
             }
         }
 
