@@ -39,7 +39,8 @@ class PurchaseActivity : AppCompatActivity() {
     private lateinit var heroSub: TextView
     private lateinit var planBox: LinearLayout
     private lateinit var ctaBtn: TextView
-    private val cards = HashMap<Int, LinearLayout>()
+    // key 用「套餐ID+周期」唯一标识：同一套餐的月/年/2年共用同一 id，若只用 id 会互相覆盖、导致选中框错位
+    private val cards = HashMap<String, LinearLayout>()
     private var webOverlay: WebView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -159,7 +160,7 @@ class PurchaseActivity : AppCompatActivity() {
             right.addView(tv("${yuan(p.price)} ${p.periodLabel}", 19f, Color.WHITE, true).apply { gravity = Gravity.END })
             card.addView(right, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
             planBox.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(11) })
-            cards[p.id] = card
+            cards["${p.id}-${p.period}"] = card
         }
         // default select recommended (year) or first
         selected = plans.firstOrNull { it.period == "year_price" } ?: plans.firstOrNull()
@@ -168,8 +169,9 @@ class PurchaseActivity : AppCompatActivity() {
 
     private fun select(p: PlanItem) {
         selected = p
+        val selKey = "${p.id}-${p.period}"
         for ((id, card) in cards) {
-            if (id == p.id) card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x2400c8ff, 0x1ac433ff))
+            if (id == selKey) card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x2400c8ff, 0x1ac433ff))
                 .apply { cornerRadius = dp(18).toFloat(); setStroke(dp(2), 0xFF00c8ff.toInt()) }
             else card.background = rounded(0x0BFFFFFF, 18, 1, 0x17FFFFFF)
         }
