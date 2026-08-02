@@ -39,11 +39,12 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.36"
+        const val APP_VERSION = "1.0.37"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // 面板域名（走 Cloudflare 的 HTTPS 通道，作为直连 IP 的备用/优先通道）
-        const val XBOARD_PANEL_DOMAIN = "my.caihongmao.org"
+        // 面板域名：用 cdn.caihongmao.org（走 CF、SNI 未被墙，节点 ①⑤⑥ 就靠它连；
+        // my.caihongmao.org 的 SNI 常被 GFW 掐，故弃用）。它是完整面板镜像：API/注册/订阅都在。
+        const val XBOARD_PANEL_DOMAIN = "cdn.caihongmao.org"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
         // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
