@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.37"
+        const val APP_VERSION = "1.0.38"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：用 cdn.caihongmao.org（走 CF、SNI 未被墙，节点 ①⑤⑥ 就靠它连；
@@ -130,22 +130,28 @@ class SetupActivity : AppCompatActivity() {
             reqHeaders: Map<String, String> = emptyMap(),
             body: ByteArray? = null
         ): Pair<Int, String> {
-            // 双通道：优先直连 IP:8080 裸 HTTP（实测国内 0.16s 又快又稳，绕开 CF/SNI/GFW），
-            // 直连 IP 被封（连接层失败）时才回退 Cloudflare 域名 HTTPS（海外/IP被封时的备用）。
-            // 之前是 CF 优先，国内用户要干等十几秒超时才切兜底 → 续费页一直转圈；反过来即可秒开。
-            // 只在“连接层失败”时回退；拿到任何 HTTP 状态码（含 4xx）即视为通道可用。
-            return try {
-                rawIpRequest(method, path, reqHeaders, body)
-            } catch (e: Exception) {
-                httpsCfRequest(method, path, reqHeaders, body)
+            // 多通道，按序尝试，任一“拿到 HTTP 状态码”即视为可用；只有“连接层失败”才切下一条：
+            //  1) cdn.caihongmao.org  (Cloudflare，多数网络最快)
+            //  2) q1.caihongmao.org   (Q4CDN 非CF，国内移动/CF被干扰时的救命通道)
+            //  3) 直连 IP:8080 裸 HTTP (海外/前两条都挂时兜底；国内高端口现常被 GFW reset，故放最后)
+            var lastErr: Exception? = null
+            for (domain in listOf(XBOARD_PANEL_DOMAIN, "q1.caihongmao.org")) {
+                try {
+                    return httpsRequest(domain, method, path, reqHeaders, body)
+                } catch (e: Exception) { lastErr = e }
             }
+            try {
+                return rawIpRequest(method, path, reqHeaders, body)
+            } catch (e: Exception) { lastErr = e }
+            throw Exception("网络不通，请切换网络(WiFi/流量)后重试" + (lastErr?.message?.let { "：$it" } ?: ""))
         }
 
-        private fun httpsCfRequest(
+        private fun httpsRequest(
+            domain: String,
             method: String, path: String,
             reqHeaders: Map<String, String>, body: ByteArray?
         ): Pair<Int, String> {
-            val conn = java.net.URL("https://$XBOARD_PANEL_DOMAIN$path")
+            val conn = java.net.URL("https://$domain$path")
                 .openConnection() as javax.net.ssl.HttpsURLConnection
             conn.requestMethod = method
             conn.connectTimeout = 7000
