@@ -39,12 +39,12 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.38"
+        const val APP_VERSION = "1.0.39"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // 面板域名：用 cdn.caihongmao.org（走 CF、SNI 未被墙，节点 ①⑤⑥ 就靠它连；
-        // my.caihongmao.org 的 SNI 常被 GFW 掐，故弃用）。它是完整面板镜像：API/注册/订阅都在。
-        const val XBOARD_PANEL_DOMAIN = "cdn.caihongmao.org"
+        // 面板域名：泛域名底座下的全新未被墙子域名（cdn4，电信实测通）。它是完整面板镜像：API/注册/订阅都在。
+        // 旧的 cdn/my/m 已被 GFW 按 SNI 逐个封杀，故换到泛域名新子域名，被封时改这里+httpApiRequest 的列表即可。
+        const val XBOARD_PANEL_DOMAIN = "cdn4.caihongmao.org"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
         // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
@@ -135,7 +135,7 @@ class SetupActivity : AppCompatActivity() {
             //  2) q1.caihongmao.org   (Q4CDN 非CF，国内移动/CF被干扰时的救命通道)
             //  3) 直连 IP:8080 裸 HTTP (海外/前两条都挂时兜底；国内高端口现常被 GFW reset，故放最后)
             var lastErr: Exception? = null
-            for (domain in listOf(XBOARD_PANEL_DOMAIN, "q1.caihongmao.org")) {
+            for (domain in listOf(XBOARD_PANEL_DOMAIN, "cdn5.caihongmao.org", "cdn6.caihongmao.org", "cdn7.caihongmao.org", "q1.caihongmao.org")) {
                 try {
                     return httpsRequest(domain, method, path, reqHeaders, body)
                 } catch (e: Exception) { lastErr = e }
