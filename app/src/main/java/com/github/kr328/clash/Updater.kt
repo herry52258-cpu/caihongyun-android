@@ -16,17 +16,23 @@ import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * app 内在线更新：
- *   1. 拉 https://caihongmao.org/version.json
+ * app 内在线更新（多通道抗封）：
+ *   1. 依次从多个未被墙域名拉 /version.json（任一成功即用）
  *   2. versionCode 比当前大 → 弹更新框（changelog + 立即更新）
- *   3. 点「立即更新」→ 下载 APK 到外部缓存（带进度）→ 拉起系统安装器
+ *   3. 下载 APK 同样多通道回退（原url→cdn4→cdn6→cdn7→dl→apex），单域名被 GFW reset 自动切换
  *
- * 说明：sideload 安装最后一步系统必弹「安装」确认框（安卓安全机制，绕不过）；
- * 首次可能要用户在设置里允许「安装未知应用」，本类会自动跳转引导。
+ * 域名被封时：服务器泛域名底座加新子域名，并把这里 DOMAINS 补一条即可。
  */
 object Updater {
 
-    private const val VERSION_URL = "https://caihongmao.org/version.json"
+    // 多通道域名（查版本 + 下 APK 共用）。都需在服务器挂了 /version.json 与 /downloads/。
+    private val DOMAINS = listOf(
+        "https://cdn4.caihongmao.org",
+        "https://cdn6.caihongmao.org",
+        "https://cdn7.caihongmao.org",
+        "https://dl.caihongmao.org",
+        "https://caihongmao.org",
+    )
 
     // 每次启动至多提示一次，避免来回切前台反复弹
     @Volatile private var promptedThisSession = false
@@ -35,7 +41,7 @@ object Updater {
         if (promptedThisSession && !manual) return
         Thread {
             try {
-                val json = httpGet(VERSION_URL) ?: return@Thread
+                val json = fetchVersionJson() ?: return@Thread
                 val o = JSONObject(json)
                 val latestCode = o.optInt("versionCode", 0)
                 val latestName = o.optString("versionName", "")
@@ -117,57 +123,81 @@ object Updater {
         dlg.show()
 
         Thread {
-            try {
-                val outDir = File(activity.externalCacheDir, "updates").apply { mkdirs() }
-                // 清掉旧的下载残留
-                outDir.listFiles()?.forEach { it.delete() }
-                val apk = File(outDir, "caihongmao-update.apk")
+            val outDir = File(activity.externalCacheDir, "updates").apply { mkdirs() }
+            // 清掉旧的下载残留
+            outDir.listFiles()?.forEach { it.delete() }
+            val apk = File(outDir, "caihongmao-update.apk")
 
-                val conn = URL(apkUrl).openConnection() as HttpsURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                conn.instanceFollowRedirects = true
-                conn.connect()
-                val total = conn.contentLength.toLong()
-                conn.inputStream.use { input ->
-                    apk.outputStream().use { output ->
-                        val buf = ByteArray(64 * 1024)
-                        var read: Int
-                        var done = 0L
-                        var lastPct = -1
-                        while (input.read(buf).also { read = it } != -1) {
-                            output.write(buf, 0, read)
-                            done += read
-                            if (total > 0) {
-                                val pct = (done * 100 / total).toInt()
-                                if (pct != lastPct) {
-                                    lastPct = pct
-                                    activity.runOnUiThread {
-                                        bar.progress = pct
-                                        label.text = "正在下载新版本… $pct%"
-                                    }
-                                }
-                            }
+            // 多通道下载：原 url 先试，再依次试各域名的 /downloads/<文件名>；被封自动切换
+            val fileName = apkUrl.substringAfterLast("/")
+            val urls = ArrayList<String>()
+            urls.add(apkUrl)
+            for (base in DOMAINS) {
+                val u = "$base/downloads/$fileName"
+                if (u != apkUrl) urls.add(u)
+            }
+
+            var ok = false
+            var lastErr: Exception? = null
+            for (u in urls) {
+                try {
+                    downloadApkOnce(u, apk) { pct ->
+                        activity.runOnUiThread {
+                            bar.progress = pct
+                            label.text = "正在下载新版本… $pct%"
                         }
                     }
+                    ok = true
+                    break
+                } catch (e: Exception) {
+                    lastErr = e
+                    activity.runOnUiThread { label.text = "线路切换重试…" }
                 }
-                conn.disconnect()
+            }
 
-                activity.runOnUiThread {
-                    dlg.dismiss()
+            activity.runOnUiThread {
+                dlg.dismiss()
+                if (ok) {
                     installApk(activity, apk)
-                }
-            } catch (e: Exception) {
-                activity.runOnUiThread {
-                    dlg.dismiss()
+                } else {
                     AlertDialog.Builder(activity)
                         .setTitle("更新失败")
-                        .setMessage("下载新版本失败：${e.message ?: "网络异常"}。可稍后重试，或到官网手动下载。")
+                        .setMessage("下载失败：${lastErr?.message ?: "网络异常"}。可稍后重试，或到 dl.caihongmao.org 手动下载。")
                         .setPositiveButton("知道了", null)
                         .show()
                 }
             }
         }.start()
+    }
+
+    /** 单次下载；被 reset 截断或文件异常会抛异常，交由上层切下一条通道。 */
+    private fun downloadApkOnce(urlStr: String, apk: File, onPct: (Int) -> Unit) {
+        val conn = URL(urlStr).openConnection() as HttpsURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 30000
+        conn.instanceFollowRedirects = true
+        conn.connect()
+        val total = conn.contentLength.toLong()
+        conn.inputStream.use { input ->
+            apk.outputStream().use { output ->
+                val buf = ByteArray(64 * 1024)
+                var read: Int
+                var done = 0L
+                var lastPct = -1
+                while (input.read(buf).also { read = it } != -1) {
+                    output.write(buf, 0, read)
+                    done += read
+                    if (total > 0) {
+                        val pct = (done * 100 / total).toInt()
+                        if (pct != lastPct) { lastPct = pct; onPct(pct) }
+                    }
+                }
+            }
+        }
+        conn.disconnect()
+        // 完整性校验：防止被 GFW reset 截断的半包被当成"下载成功"
+        if (total > 0 && apk.length() < total) throw Exception("下载不完整（线路中断）")
+        if (apk.length() < 1_000_000) throw Exception("文件异常")
     }
 
     private fun installApk(activity: Activity, apk: File) {
@@ -184,13 +214,22 @@ object Updater {
         } catch (e: Exception) {
             AlertDialog.Builder(activity)
                 .setTitle("无法启动安装")
-                .setMessage("请到官网手动下载安装：caihongmao.org")
+                .setMessage("请到 dl.caihongmao.org 手动下载安装。")
                 .setPositiveButton("知道了", null)
                 .show()
         }
     }
 
     // ---------------- helpers ----------------
+
+    /** 依次试各域名的 /version.json，任一返回含 versionCode 的内容即用。 */
+    private fun fetchVersionJson(): String? {
+        for (base in DOMAINS) {
+            val j = httpGet("$base/version.json")
+            if (j != null && j.contains("versionCode")) return j
+        }
+        return null
+    }
 
     private fun currentVersionCode(activity: Activity): Int = try {
         val pi = activity.packageManager.getPackageInfo(activity.packageName, 0)
@@ -200,8 +239,8 @@ object Updater {
 
     private fun httpGet(url: String): String? = try {
         val conn = URL(url).openConnection() as HttpsURLConnection
-        conn.connectTimeout = 7000
-        conn.readTimeout = 10000
+        conn.connectTimeout = 3000
+        conn.readTimeout = 8000
         conn.setRequestProperty("Cache-Control", "no-cache")
         if (conn.responseCode == 200)
             conn.inputStream.readBytes().toString(Charsets.UTF_8) else null

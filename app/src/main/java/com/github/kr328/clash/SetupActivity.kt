@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.40"
+        const val APP_VERSION = "1.0.41"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：泛域名底座下的全新未被墙子域名（cdn4，电信实测通）。它是完整面板镜像：API/注册/订阅都在。
