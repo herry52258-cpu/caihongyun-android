@@ -39,12 +39,12 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.41"
+        const val APP_VERSION = "1.0.42"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：泛域名底座下的全新未被墙子域名（cdn4，电信实测通）。它是完整面板镜像：API/注册/订阅都在。
         // 旧的 cdn/my/m 已被 GFW 按 SNI 逐个封杀，故换到泛域名新子域名，被封时改这里+httpApiRequest 的列表即可。
-        const val XBOARD_PANEL_DOMAIN = "cdn4.caihongmao.org"
+        const val XBOARD_PANEL_DOMAIN = "cdn8.caihongmao.org"
         // Direct server IP + port 8080 (plain HTTP, no TLS).
         // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
         // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
@@ -144,6 +144,21 @@ class SetupActivity : AppCompatActivity() {
                 return rawIpRequest(method, path, reqHeaders, body)
             } catch (e: Exception) { lastErr = e }
             throw Exception("网络不通，请切换网络(WiFi/流量)后重试" + (lastErr?.message?.let { "：$it" } ?: ""))
+        }
+
+        /** 注册 WebView 用：依次探测各面板域名，返回第一个能连通的（被封的自动跳过）。 */
+        fun firstReachablePanelDomain(): String {
+            for (d in listOf(XBOARD_PANEL_DOMAIN, "cdn2.caihongmao.org", "cdn6.caihongmao.org", "cdn7.caihongmao.org", "cdn5.caihongmao.org")) {
+                try {
+                    val conn = java.net.URL("https://$d/api/v1/guest/comm/config")
+                        .openConnection() as javax.net.ssl.HttpsURLConnection
+                    conn.connectTimeout = 3000; conn.readTimeout = 5000
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (code in 200..499) return d
+                } catch (_: Exception) { }
+            }
+            return XBOARD_PANEL_DOMAIN
         }
 
         private fun httpsRequest(
@@ -477,9 +492,12 @@ class SetupActivity : AppCompatActivity() {
                 backToAppLoginIfDone(url)
             }
         }
-        // 走 Cloudflare 域名（IP:8080 会被 GFW 间歇拦截导致空白页）
-        wv.loadUrl("https://$XBOARD_PANEL_DOMAIN/#/register")
         setContentView(wv)
+        // 多通道：后台先找一个能连通的面板域名再加载注册页（写死单域名被封会 ERR_CONNECTION_ABORTED 白屏）
+        Thread {
+            val d = firstReachablePanelDomain()
+            runOnUiThread { wv.loadUrl("https://$d/#/register") }
+        }.start()
     }
 
     private suspend fun importSubscription(url: String) {
