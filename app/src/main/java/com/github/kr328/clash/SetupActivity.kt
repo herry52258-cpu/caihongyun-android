@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.39"
+        const val APP_VERSION = "1.0.40"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：泛域名底座下的全新未被墙子域名（cdn4，电信实测通）。它是完整面板镜像：API/注册/订阅都在。
@@ -135,7 +135,7 @@ class SetupActivity : AppCompatActivity() {
             //  2) q1.caihongmao.org   (Q4CDN 非CF，国内移动/CF被干扰时的救命通道)
             //  3) 直连 IP:8080 裸 HTTP (海外/前两条都挂时兜底；国内高端口现常被 GFW reset，故放最后)
             var lastErr: Exception? = null
-            for (domain in listOf(XBOARD_PANEL_DOMAIN, "cdn5.caihongmao.org", "cdn6.caihongmao.org", "cdn7.caihongmao.org", "q1.caihongmao.org")) {
+            for (domain in listOf(XBOARD_PANEL_DOMAIN, "cdn2.caihongmao.org", "cdn6.caihongmao.org", "cdn7.caihongmao.org", "cdn5.caihongmao.org", "q1.caihongmao.org")) {
                 try {
                     return httpsRequest(domain, method, path, reqHeaders, body)
                 } catch (e: Exception) { lastErr = e }
@@ -154,8 +154,8 @@ class SetupActivity : AppCompatActivity() {
             val conn = java.net.URL("https://$domain$path")
                 .openConnection() as javax.net.ssl.HttpsURLConnection
             conn.requestMethod = method
-            conn.connectTimeout = 7000
-            conn.readTimeout = 12000
+            conn.connectTimeout = 3000
+            conn.readTimeout = 8000
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("Accept", "application/json")
             reqHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
