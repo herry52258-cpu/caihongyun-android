@@ -181,16 +181,27 @@ class PurchaseActivity : AppCompatActivity() {
     // ---------- data ----------
     private fun loadData() {
         lifecycleScope.launch {
-            try {
-                val auth = mapOf("Authorization" to token!!)
-                val (pc, pr) = withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("GET", "/api/v1/user/plan/fetch", auth) }
-                if (pc != 200) { toast("加载套餐失败 ($pc)"); return@launch }
-                parsePlans(pr)
-                val (mc, mr) = withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("GET", "/api/v1/user/order/getPaymentMethod", auth) }
-                if (mc == 200) parsePayments(mr)
-                renderPlans()
-                loadStatus(auth)
-            } catch (e: Exception) { toast("加载失败：${e.message}") }
+            val auth = mapOf("Authorization" to token!!)
+            var lastMsg = "网络异常"
+            // 重试2次：被封线路上多通道切换较慢，一次失败再试一次；不吞协程取消，避免"Job was cancelled"误报
+            repeat(2) { attempt ->
+                try {
+                    val (pc, pr) = withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("GET", "/api/v1/user/plan/fetch", auth) }
+                    if (pc != 200) { lastMsg = "套餐接口 $pc"; throw Exception(lastMsg) }
+                    parsePlans(pr)
+                    val (mc, mr) = withContext(Dispatchers.IO) { SetupActivity.httpApiRequest("GET", "/api/v1/user/order/getPaymentMethod", auth) }
+                    if (mc == 200) parsePayments(mr)
+                    renderPlans()
+                    loadStatus(auth)
+                    return@launch
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastMsg = e.message ?: lastMsg
+                    if (attempt == 0) kotlinx.coroutines.delay(700)
+                }
+            }
+            toast("加载失败：$lastMsg，请点右上角重试或切换网络")
         }
     }
 
