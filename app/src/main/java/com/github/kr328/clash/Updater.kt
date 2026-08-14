@@ -27,9 +27,9 @@ object Updater {
 
     // 多通道域名（查版本 + 下 APK 共用）。都需在服务器挂了 /version.json 与 /downloads/。
     private val DOMAINS = listOf(
-        "https://cdn5.caihongmao.org",
-        "https://cdn6.caihongmao.org",
-        "https://cdn7.caihongmao.org",
+        "https://cdn9.caihongmao.org",
+        "https://cdn10.caihongmao.org",
+        "https://cdn11.caihongmao.org",
         "https://dl.caihongmao.org",
         "https://caihongmao.org",
     )
