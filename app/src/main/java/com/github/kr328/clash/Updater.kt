@@ -27,12 +27,12 @@ object Updater {
 
     // 多通道域名（查版本 + 下 APK 共用）。都需在服务器挂了 /version.json 与 /downloads/。
     private val DOMAINS = listOf(
-        "https://p1.lianjieni.com",
-        "https://p2.lianjieni.com",
-        "https://p3.lianjieni.com",
-        "https://dl.lianjieni.com",
-        "https://cdn9.caihongmao.org",
-        "https://dl.caihongmao.org",
+        "https://p1.yuntanlu.com",
+        "https://p2.yuntanlu.com",
+        "https://w1.yuntanlu.com",
+        "https://dl.yuntanlu.com",
+        "https://w2.yuntanlu.com",
+        "https://w3.yuntanlu.com",
     )
 
     // 每次启动至多提示一次，避免来回切前台反复弹
@@ -163,7 +163,7 @@ object Updater {
                 } else {
                     AlertDialog.Builder(activity)
                         .setTitle("更新失败")
-                        .setMessage("下载失败：${lastErr?.message ?: "网络异常"}。可稍后重试，或到 dl.lianjieni.com 手动下载。")
+                        .setMessage("下载失败：${lastErr?.message ?: "网络异常"}。可稍后重试，或到 dl.yuntanlu.com 手动下载。")
                         .setPositiveButton("知道了", null)
                         .show()
                 }
@@ -215,7 +215,7 @@ object Updater {
         } catch (e: Exception) {
             AlertDialog.Builder(activity)
                 .setTitle("无法启动安装")
-                .setMessage("请到 dl.lianjieni.com 手动下载安装。")
+                .setMessage("请到 dl.yuntanlu.com 手动下载安装。")
                 .setPositiveButton("知道了", null)
                 .show()
         }
