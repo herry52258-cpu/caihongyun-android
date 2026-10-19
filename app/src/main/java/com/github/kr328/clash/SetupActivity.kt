@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.47"
+        const val APP_VERSION = "1.0.48"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：换到全新域名 lianjieni.com（GFW 未封过）。它是完整面板镜像：API/注册/订阅都在。
@@ -134,31 +134,46 @@ class SetupActivity : AppCompatActivity() {
             //  1) cdn.caihongmao.org  (Cloudflare，多数网络最快)
             //  2) q1.caihongmao.org   (Q4CDN 非CF，国内移动/CF被干扰时的救命通道)
             //  3) 直连 IP:8080 裸 HTTP (海外/前两条都挂时兜底；国内高端口现常被 GFW reset，故放最后)
-            var lastErr: Exception? = null
-            for (domain in listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com", "w3.yuntanlu.com")) {
-                try {
-                    return httpsRequest(domain, method, path, reqHeaders, body)
-                } catch (e: Exception) { lastErr = e }
-            }
+            // 并行同时试所有面板域名，谁先拿到 HTTP 响应就用谁。
+            // （旧版串行逐个超时：移动网络上被封域名要一个个等 readTimeout，叠起来卡几分钟。）
+            val domains = listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com", "w3.yuntanlu.com")
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(domains.size)
             try {
-                return rawIpRequest(method, path, reqHeaders, body)
-            } catch (e: Exception) { lastErr = e }
-            throw Exception("网络不通，请切换网络(WiFi/流量)后重试" + (lastErr?.message?.let { "：$it" } ?: ""))
+                val tasks = domains.map { d ->
+                    java.util.concurrent.Callable { httpsRequest(d, method, path, reqHeaders, body) }
+                }
+                return pool.invokeAny(tasks, 12, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                try {
+                    return rawIpRequest(method, path, reqHeaders, body)
+                } catch (e2: Exception) { }
+                throw Exception("网络不通，请切换网络(WiFi/流量)后重试")
+            } finally {
+                pool.shutdownNow()
+            }
         }
 
         /** 注册 WebView 用：依次探测各面板域名，返回第一个能连通的（被封的自动跳过）。 */
         fun firstReachablePanelDomain(): String {
-            for (d in listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com")) {
-                try {
-                    val conn = java.net.URL("https://$d/api/v1/guest/comm/config")
-                        .openConnection() as javax.net.ssl.HttpsURLConnection
-                    conn.connectTimeout = 2500; conn.readTimeout = 5000
-                    val code = conn.responseCode
-                    conn.disconnect()
-                    if (code in 200..499) return d
-                } catch (_: Exception) { }
+            val fdomains = listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com")
+            val fpool = java.util.concurrent.Executors.newFixedThreadPool(fdomains.size)
+            try {
+                val tasks = fdomains.map { d ->
+                    java.util.concurrent.Callable {
+                        val conn = java.net.URL("https://$d/api/v1/guest/comm/config")
+                            .openConnection() as javax.net.ssl.HttpsURLConnection
+                        conn.connectTimeout = 2500; conn.readTimeout = 5000
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        if (code in 200..499) d else throw Exception("bad")
+                    }
+                }
+                return fpool.invokeAny(tasks, 8, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                return XBOARD_PANEL_DOMAIN
+            } finally {
+                fpool.shutdownNow()
             }
-            return XBOARD_PANEL_DOMAIN
         }
 
         private fun httpsRequest(
@@ -170,7 +185,7 @@ class SetupActivity : AppCompatActivity() {
                 .openConnection() as javax.net.ssl.HttpsURLConnection
             conn.requestMethod = method
             conn.connectTimeout = 2500
-            conn.readTimeout = 8000
+            conn.readTimeout = 6000
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("Accept", "application/json")
             reqHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
