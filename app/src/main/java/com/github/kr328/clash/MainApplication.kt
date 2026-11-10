@@ -1,7 +1,9 @@
 package com.github.kr328.clash
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.os.Bundle
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.compat.currentProcessName
 import com.github.kr328.clash.common.log.Log
@@ -30,6 +32,19 @@ class MainApplication : Application() {
 
         if (processName == packageName) {
             Remote.launch()
+            // 打开 App，以及从后台回到任意页面时，已登录就按 60 秒节流重拉一次订阅
+            registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+                override fun onActivityResumed(activity: Activity) {
+                    LineRefresh.scheduleAuto(activity)
+                }
+
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+                override fun onActivityStarted(activity: Activity) {}
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivityStopped(activity: Activity) {}
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {}
+            })
         } else {
             sendServiceRecreated()
         }

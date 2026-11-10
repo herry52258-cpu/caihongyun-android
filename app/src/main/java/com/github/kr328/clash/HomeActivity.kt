@@ -50,6 +50,7 @@ class HomeActivity : AppCompatActivity() {
     private var connecting = false
     private var connectStartAt = 0L
     private var selectorGroup: String? = null
+    private var nodeDialogReload: (() -> Unit)? = null
     private var webOverlay: WebView? = null
     private var trialWelcomeShown = false
     private var expiredPromptShown = false
@@ -85,8 +86,20 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!::subStatus.isInitialized) return
         // 每次回到首页刷新订阅状态（体验倒计时 / 会员到期 / 升级后立即变化）
         refreshSubscription()
+        LineRefresh.onLinesUpdated = {
+            if (!isDestroyed) nodeDialogReload?.invoke()
+        }
+        // 打开首页、从后台回到首页时自动重拉线路（60 秒节流，失败不提示）
+        LineRefresh.scheduleAuto(this)
+    }
+
+    override fun onDestroy() {
+        nodeDialogReload = null
+        if (LineRefresh.onLinesUpdated != null) LineRefresh.onLinesUpdated = null
+        super.onDestroy()
     }
 
     // ---------------- 订阅 / 免费体验状态 ----------------
@@ -424,30 +437,156 @@ class HomeActivity : AppCompatActivity() {
     // ---------------- node picker ----------------
 
     private fun pickNode() {
-        if (!Remote.broadcasts.clashRunning) { toast("请先连接后再选择节点"); return }
-        lifecycleScope.launch {
-            try {
-                val g = selectorGroupName() ?: run { toast("暂无可选节点"); return@launch }
-                val group = withClash { queryProxyGroup(g, ProxySort.Default) }
-                val proxies = group.proxies
-                if (proxies.isEmpty()) { toast("暂无可选节点"); return@launch }
-                val labels = proxies.map { p ->
-                    val d = if (p.delay in 1..9999) "  ${p.delay}ms" else ""
-                    (if (p.name == group.now) "✓ " else "   ") + nf(p.name) + d
-                }.toTypedArray()
-                AlertDialog.Builder(this@HomeActivity)
-                    .setTitle("选择节点")
-                    .setItems(labels) { _, which ->
-                        lifecycleScope.launch {
-                            try {
-                                withClash { patchSelector(g, proxies[which].name) }
-                                nodeName.text = nf(proxies[which].name)
-                            } catch (_: Exception) { toast("切换失败") }
-                        }
-                    }
-                    .show()
-            } catch (_: Exception) { toast("获取节点失败") }
+        val names = mutableListOf<String>()
+        var groupName: String? = null
+        var selectable = false
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(4))
         }
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+        }
+        val refreshBtn = androidx.appcompat.widget.AppCompatButton(this).apply {
+            text = "🔄 刷新线路"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            supportBackgroundTintList = null
+            background = gradientPill(
+                14,
+                intArrayOf(0xFFff1e6e.toInt(), 0xFFff6a00.toInt(), 0xFF00c8ff.toInt(), 0xFFc433ff.toInt())
+            )
+        }
+        val refreshRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(progress, LinearLayout.LayoutParams(dp(28), dp(28)))
+            addView(refreshBtn, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
+        }
+        val status = TextView(this).apply {
+            text = "未连接也可以刷新，当前连接不会被断开"
+            setTextColor(Color.parseColor("#888888"))
+            textSize = 12f
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        val empty = TextView(this).apply {
+            text = "正在读取线路…"
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#666666"))
+            setPadding(0, dp(28), 0, dp(12))
+        }
+        val list = ListView(this).apply { visibility = View.GONE }
+        root.addView(refreshRow)
+        root.addView(status)
+        root.addView(empty)
+        root.addView(list, LinearLayout.LayoutParams(MATCH_PARENT, dp(300)))
+
+        fun render(items: List<Pair<String, String>>, canSelect: Boolean, group: String?) {
+            names.clear()
+            groupName = group
+            selectable = canSelect
+            items.forEach { names.add(it.first) }
+            list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, items.map { it.second })
+            val isEmpty = items.isEmpty()
+            empty.text = if (isEmpty) "暂无线路，点上方刷新" else ""
+            empty.visibility = if (isEmpty) View.VISIBLE else View.GONE
+            list.visibility = if (isEmpty) View.GONE else View.VISIBLE
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("线路列表")
+            .setView(root)
+            .setNegativeButton("关闭", null)
+            .create()
+
+        val reload: () -> Unit = {
+            lifecycleScope.launch {
+                val (items, canSelect, group) = queryLineRows()
+                if (isDestroyed || !dialog.isShowing) return@launch
+                render(items, canSelect, group)
+            }
+        }
+        nodeDialogReload = reload
+
+        list.setOnItemClickListener { _, _, which, _ ->
+            if (!selectable || !Remote.broadcasts.clashRunning) {
+                toast("请先连接后再切换线路")
+                return@setOnItemClickListener
+            }
+            val group = groupName ?: return@setOnItemClickListener
+            val name = names.getOrNull(which) ?: return@setOnItemClickListener
+            lifecycleScope.launch {
+                try {
+                    withClash { patchSelector(group, name) }
+                    nodeName.text = nf(name)
+                    reload()
+                } catch (_: Exception) {
+                    toast("切换失败")
+                }
+            }
+        }
+
+        refreshBtn.setOnClickListener {
+            if (!refreshBtn.isEnabled) return@setOnClickListener
+            refreshBtn.isEnabled = false
+            refreshBtn.alpha = 0.55f
+            refreshBtn.text = "刷新中…"
+            progress.visibility = View.VISIBLE
+            status.setTextColor(Color.parseColor("#888888"))
+            status.text = "正在重新拉取订阅…"
+            lifecycleScope.launch {
+                val result = try {
+                    LineRefresh.refresh(this@HomeActivity)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    LineRefresh.Result(false, 0, "刷新失败：请稍后重试")
+                }
+                if (isDestroyed) return@launch
+                refreshBtn.isEnabled = true
+                refreshBtn.alpha = 1f
+                refreshBtn.text = "🔄 刷新线路"
+                progress.visibility = View.GONE
+                status.setTextColor(
+                    if (result.ok) Color.parseColor("#1b8a4a") else Color.parseColor("#d32f2f")
+                )
+                status.text = result.message
+                Toast.makeText(this@HomeActivity, result.message, Toast.LENGTH_LONG).show()
+                if (dialog.isShowing) reload()
+            }
+        }
+
+        dialog.setOnDismissListener {
+            if (nodeDialogReload === reload) nodeDialogReload = null
+        }
+        dialog.show()
+        reload()
+    }
+
+    private suspend fun queryLineRows(): Triple<List<Pair<String, String>>, Boolean, String?> {
+        if (Remote.broadcasts.clashRunning) {
+            try {
+                selectorGroup = null
+                val group = selectorGroupName()
+                if (group != null) {
+                    val proxies = withClash { queryProxyGroup(group, ProxySort.Default) }
+                    if (proxies.proxies.isNotEmpty()) {
+                        val items = proxies.proxies.map { p ->
+                            val mark = if (p.name == proxies.now) "✓ " else "   "
+                            val delay = if (p.delay in 1..9999) "  ${p.delay}ms" else ""
+                            p.name to (mark + nf(p.name) + delay)
+                        }
+                        return Triple(items, true, group)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        val saved = LineRefresh.savedLineNames(this)
+        return Triple(saved.map { it to ("   " + nf(it)) }, false, null)
     }
 
     // ---------------- menu ----------------

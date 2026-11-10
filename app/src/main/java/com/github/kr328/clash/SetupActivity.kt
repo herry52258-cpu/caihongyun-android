@@ -39,7 +39,7 @@ class SetupActivity : AppCompatActivity() {
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
         // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.48"
+        const val APP_VERSION = "1.0.49"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
         // 面板域名：换到全新域名 lianjieni.com（GFW 未封过）。它是完整面板镜像：API/注册/订阅都在。
@@ -61,29 +61,14 @@ class SetupActivity : AppCompatActivity() {
          * 无套餐时导入的是空配置，开通后必须重拉一次才有节点，否则"付了钱却连不上"。
          * 返回 true=成功刷新且含真实节点；false=拉取失败或仍是空配置。
          */
-        suspend fun reimportNodes(context: Context): Boolean = withContext(Dispatchers.IO) {
-            val url = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_SUBSCRIPTION_URL, null) ?: return@withContext false
-            val path = try {
-                val uri = java.net.URI(url)
-                uri.rawPath + if (uri.rawQuery != null) "?${uri.rawQuery}" else ""
-            } catch (e: Exception) { "/s/" + url.substringAfterLast("/s/") }
-            val (code, content) = httpApiRequest(
-                "GET", path, reqHeaders = mapOf("User-Agent" to "ClashMetaForAndroid/2.10.1")
-            )
-            if (code != 200) return@withContext false
-            // 有真实节点才导入（空配置只有 "proxies: []"，避免覆盖已有节点为空）
-            val hasNodes = content.contains("type: vless") || content.contains("type: trojan") ||
-                content.contains("type: ss") || content.contains("proxy-providers:")
-            if (!hasNodes) return@withContext false
-            val uuid = withProfile { create(type = Profile.Type.File, name = "彩虹猫订阅", source = "") }
-            context.filesDir.resolve("pending").resolve(uuid.toString())
-                .resolve("config.yaml").writeText(content)
-            withProfile {
-                commit(uuid)
-                queryByUUID(uuid)?.let { setActive(it) }
+        suspend fun reimportNodes(context: Context): Boolean {
+            return try {
+                // 与手动刷新同一条路径：用已保存的凭证重拉，并尽量保持当前选中线路
+                LineRefresh.refresh(context).ok
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                false
             }
-            true
         }
 
         private data class RawResponse(val code: Int, val headers: Map<String, String>, val body: ByteArray)
@@ -425,6 +410,8 @@ class SetupActivity : AppCompatActivity() {
     private fun saveAndLaunch(subscriptionUrl: String) {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putString(KEY_SUBSCRIPTION_URL, subscriptionUrl).apply()
+        // 登录刚导入过，回到首页的 60 秒内不必再自动拉一次
+        LineRefresh.noteJustFetched(this)
         val vpnRequest = VpnService.prepare(this)
         if (vpnRequest != null) {
             vpnPermissionLauncher.launch(vpnRequest)
