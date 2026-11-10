@@ -146,7 +146,7 @@ class InviteActivity : AppCompatActivity() {
                 }
                 val data = j.optJSONObject("data")
                 val code = if (codes != null && codes.length() > 0) codes.getJSONObject(0).optString("code") else ""
-                inviteLink = if (code.isNotEmpty()) "https://${SetupActivity.XBOARD_PANEL_DOMAIN}/#/register?code=$code" else ""
+                inviteLink = if (code.isNotEmpty()) SetupActivity.panelPageUrl("register?code=$code") else ""
                 linkText.text = if (inviteLink.isNotEmpty()) inviteLink else "生成失败，请重试"
                 val stat = data?.optJSONArray("stat")
                 if (stat != null && stat.length() >= 5) {

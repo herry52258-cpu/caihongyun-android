@@ -636,7 +636,7 @@ class HomeActivity : AppCompatActivity() {
 
     private fun openWeb(url: String) {
         // 用登录时存下的 token 提前设 access_token cookie，面板 SPA 读到即自动登录
-        val base = "http://${SetupActivity.XBOARD_IP}:${SetupActivity.XBOARD_API_PORT}"
+        val base = "https://${SetupActivity.webPanelHost()}"
         val token = getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(SetupActivity.KEY_AUTH_TOKEN, null)
         val cm = android.webkit.CookieManager.getInstance()
