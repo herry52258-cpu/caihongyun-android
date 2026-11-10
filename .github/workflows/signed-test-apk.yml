@@ -1,0 +1,130 @@
+# 临时 workflow：只为 cursor/panel-endpoints-2.11.42-013c 打一份正式证书的测试包。
+# 合并前必须删掉这个文件。不打 tag、不建 Release、不推下载站、不发消息。
+name: 临时签名测试包（不发版）
+
+on:
+  push:
+    branches:
+      - cursor/panel-endpoints-2.11.42-013c
+
+jobs:
+  signed-apk:
+    if: github.ref == 'refs/heads/cursor/panel-endpoints-2.11.42-013c'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: 确认签名 secret 已注入
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          missing=0
+          for name in SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD SIGNING_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "缺少 secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "push 事件没有拿到签名 secret（ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_SIGNING_KEY）。停止，不编译 debug 包。"
+            exit 1
+          fi
+          echo "四个签名 secret 均已注入，不打印内容。"
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout submodules
+        run: git submodule update --init --recursive --force
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Update CA
+        run: |
+          sudo apt-get update && sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates
+          cp -f /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
+
+      - name: 配置签名
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          echo "$SIGNING_KEY_BASE64" | base64 -d > release.keystore
+          if ! keytool -list -keystore release.keystore -storepass "$SIGNING_STORE_PASSWORD" >/dev/null; then
+            echo "keystore 无法用 ANDROID_KEYSTORE_PASSWORD 打开"
+            exit 1
+          fi
+          umask 077
+          printf 'keystore.path=../release.keystore\nkeystore.password=%s\nkey.alias=%s\nkey.password=%s\n' \
+            "$SIGNING_STORE_PASSWORD" "$SIGNING_KEY_ALIAS" "$SIGNING_KEY_PASSWORD" > signing.properties
+          test -s release.keystore
+          test -s signing.properties
+
+      - name: 编译 release APK
+        run: ./gradlew --no-daemon app:assembleMetaRelease
+
+      - name: 取出 arm64 包并核对正式证书
+        run: |
+          f=$(find app/build/outputs/apk/meta/release -name "*arm64-v8a*.apk" | head -1)
+          if [ -z "$f" ]; then
+            echo "未找到 arm64 APK"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$f" dist/caihongyun-2.11.42-arm64-v8a-signed.apk
+          apk=dist/caihongyun-2.11.42-arm64-v8a-signed.apk
+          signer=$(find "$HOME" /usr /opt -path '*build-tools*' -name apksigner -type f 2>/dev/null | sort | tail -1)
+          if [ -z "$signer" ]; then
+            echo "找不到 apksigner"
+            exit 1
+          fi
+          echo "apksigner=$signer"
+          "$signer" verify --print-certs "$apk" | tee certs.txt
+          if ! grep -q 'ce4e7d0b' certs.txt; then
+            echo "证书 SHA-256 不是正式版 ce4e7d0b…，拒绝上传"
+            exit 1
+          fi
+          sha256sum "$apk" | tee apk.sha256
+          "$signer" verify --print-certs "$apk" >/dev/null
+
+      - name: 上传测试 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: caihongyun-2.11.42-signed
+          path: |
+            dist/caihongyun-2.11.42-arm64-v8a-signed.apk
+            apk.sha256
+            certs.txt
+          retention-days: 14
+          if-no-files-found: error
