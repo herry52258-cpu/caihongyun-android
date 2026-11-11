@@ -12,6 +12,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.util.startClashService
 import com.github.kr328.clash.util.withProfile
@@ -19,10 +20,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.Socket
 
 class SetupActivity : AppCompatActivity() {
 
@@ -38,18 +35,54 @@ class SetupActivity : AppCompatActivity() {
         const val PREFS_NAME = "caihongyun_prefs"
         const val KEY_SUBSCRIPTION_URL = "subscription_url"
         const val KEY_AUTH_TOKEN = "auth_token"
-        // 全 app 唯一的营销版本号来源：发版时只改这一处（外加 build.gradle 的 versionCode）
-        const val APP_VERSION = "1.0.49"
+        // 关于页 / 登录页展示的版本。发版时和 build.gradle 的 versionName 一起改。
+        const val APP_VERSION = "2.11.42"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // 面板域名：换到全新域名 lianjieni.com（GFW 未封过）。它是完整面板镜像：API/注册/订阅都在。
-        // caihongmao.org 整域名已在部分线路被 GFW 整段封杀，故主通道换到 lianjieni；被封时改这里+httpApiRequest 的列表即可。
-        const val XBOARD_PANEL_DOMAIN = "p1.yuntanlu.com"
-        // Direct server IP + port 8080 (plain HTTP, no TLS).
-        // GFW strips SNI from TLS ClientHello on Cloudflare IPs — HTTPS is unworkable.
-        // xboard listens on 0.0.0.0:8080, directly reachable from the internet.
-        const val XBOARD_IP = "5.253.38.67"
-        const val XBOARD_API_PORT = 8080
+        // 新面板入口，按这个顺序逐个试。都指向同一个 Xboard，挂在 Cloudflare 后面。只写域名。
+        val NEW_PANEL_HOSTS = listOf(
+            "nlogin.lianjieni.com",
+            "np1.lianjieni.com",
+            "login.lianjieni.com",
+            "np2.lianjieni.com",
+        )
+        // 四个新入口都失败后才回退。这些旧地址在国内已被封，只作兜底。
+        val OLD_PANEL_HOSTS = listOf(
+            "p1.yuntanlu.com",
+            "p2.yuntanlu.com",
+            "w1.yuntanlu.com",
+            "w2.yuntanlu.com",
+            "w3.yuntanlu.com",
+        )
+        // 注册、忘记密码、邀请链接不使用 p1。
+        val WEB_PANEL_HOSTS = NEW_PANEL_HOSTS + OLD_PANEL_HOSTS.filter { it != "p1.yuntanlu.com" }
+        const val XBOARD_PANEL_DOMAIN = "nlogin.lianjieni.com"
+        private const val KEY_PREFERRED_PANEL = "preferred_panel_host"
+        private const val CONNECT_TIMEOUT_MS = 1500
+        private const val READ_TIMEOUT_MS = 3500
+
+        // 检查更新：先新面板（这些域名上有 /version.json），再下载站，最后旧地址。
+        val VERSION_JSON_BASES = listOf(
+            "https://nlogin.lianjieni.com",
+            "https://np1.lianjieni.com",
+            "https://login.lianjieni.com",
+            "https://np2.lianjieni.com",
+            "https://down.yuntanlu.com",
+            "https://ndl.lianjieni.com",
+            "https://p2.yuntanlu.com",
+            "https://w1.yuntanlu.com",
+            "https://w2.yuntanlu.com",
+            "https://w3.yuntanlu.com",
+            "https://dl.yuntanlu.com",
+            "https://p1.yuntanlu.com",
+        )
+        // 下载站：down → ndl，dl 兜底。
+        val DOWNLOAD_BASES = listOf(
+            "https://down.yuntanlu.com",
+            "https://ndl.lianjieni.com",
+            "https://dl.yuntanlu.com",
+        )
+        const val DOWNLOAD_PAGE = "https://down.yuntanlu.com"
 
         fun isSetupDone(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -71,43 +104,34 @@ class SetupActivity : AppCompatActivity() {
             }
         }
 
-        private data class RawResponse(val code: Int, val headers: Map<String, String>, val body: ByteArray)
+        /** 上次成功的面板域名放最前，其余保持原顺序。 */
+        fun orderedHosts(base: List<String>): List<String> {
+            val preferred = preferredPanel()
+            if (preferred.isNullOrBlank() || preferred !in base) return base
+            return listOf(preferred) + base.filter { it != preferred }
+        }
 
-        private fun parseRawHttp(raw: ByteArray): RawResponse {
-            var sepPos = -1
-            for (i in 0..raw.size - 4) {
-                if (raw[i] == 13.toByte() && raw[i+1] == 10.toByte() &&
-                    raw[i+2] == 13.toByte() && raw[i+3] == 10.toByte()) {
-                    sepPos = i; break
-                }
+        fun versionJsonBases(): List<String> {
+            val preferred = preferredPanel()?.let { "https://$it" }
+            val promotable = NEW_PANEL_HOSTS.map { "https://$it" }.toSet()
+            if (preferred != null && preferred in promotable) {
+                return listOf(preferred) + VERSION_JSON_BASES.filter { it != preferred }
             }
-            if (sepPos < 0) throw Exception("无效 HTTP 响应")
-            val headerStr = raw.copyOfRange(0, sepPos).toString(Charsets.UTF_8)
-            var bodyBytes = raw.copyOfRange(sepPos + 4, raw.size)
-            val lines = headerStr.split("\r\n")
-            val statusCode = lines.getOrElse(0) { "" }.split(" ").getOrNull(1)?.toInt() ?: 0
-            val headers = lines.drop(1).associate { line ->
-                val idx = line.indexOf(':')
-                if (idx > 0) line.substring(0, idx).trim().lowercase() to line.substring(idx + 1).trim()
-                else "" to ""
-            }
-            if (headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true) {
-                bodyBytes = decodeChunked(bodyBytes)
-            }
-            return RawResponse(statusCode, headers, bodyBytes)
+            return VERSION_JSON_BASES
+        }
+
+        /** 注册 / 忘记密码 / 邀请链接用的面板域名。不会是 p1。 */
+        fun webPanelHost(): String =
+            preferredPanel()?.takeIf { it in WEB_PANEL_HOSTS } ?: XBOARD_PANEL_DOMAIN
+
+        fun panelPageUrl(route: String): String {
+            val hash = route.removePrefix("#").removePrefix("/")
+            return "https://${webPanelHost()}/#/$hash"
         }
 
         /**
-         * Plain HTTP request to xboard on port 8080.
-         *
-         * HTTPS via Cloudflare IPs is impossible from China: GFW strips the SNI extension
-         * from TLS ClientHello, causing Cloudflare to send HANDSHAKE_FAILURE immediately.
-         * Multiple approaches (custom SSLSocketFactory, raw SSLSocket) all fail for the
-         * same reason — the fix must be at the network level, not the SSL library level.
-         *
-         * Solution: xboard's Docker container is exposed on 0.0.0.0:8080, directly reachable
-         * from the internet. Plain HTTP on port 8080 to the server IP bypasses Cloudflare,
-         * TLS, SNI, and GFW SNI stripping entirely.
+         * 面板 API。按顺序逐个试：新入口，然后旧地址。
+         * 单个地址连不上就尽快换下一个；拿到 HTTP 状态码即停，并记住这个域名。
          */
         fun httpApiRequest(
             method: String,
@@ -115,49 +139,49 @@ class SetupActivity : AppCompatActivity() {
             reqHeaders: Map<String, String> = emptyMap(),
             body: ByteArray? = null
         ): Pair<Int, String> {
-            // 多通道，按序尝试，任一“拿到 HTTP 状态码”即视为可用；只有“连接层失败”才切下一条：
-            //  1) cdn.caihongmao.org  (Cloudflare，多数网络最快)
-            //  2) q1.caihongmao.org   (Q4CDN 非CF，国内移动/CF被干扰时的救命通道)
-            //  3) 直连 IP:8080 裸 HTTP (海外/前两条都挂时兜底；国内高端口现常被 GFW reset，故放最后)
-            // 并行同时试所有面板域名，谁先拿到 HTTP 响应就用谁。
-            // （旧版串行逐个超时：移动网络上被封域名要一个个等 readTimeout，叠起来卡几分钟。）
-            val domains = listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com", "w3.yuntanlu.com")
-            val pool = java.util.concurrent.Executors.newFixedThreadPool(domains.size)
-            try {
-                val tasks = domains.map { d ->
-                    java.util.concurrent.Callable { httpsRequest(d, method, path, reqHeaders, body) }
-                }
-                return pool.invokeAny(tasks, 12, java.util.concurrent.TimeUnit.SECONDS)
-            } catch (e: Exception) {
+            for (domain in orderedHosts(NEW_PANEL_HOSTS + OLD_PANEL_HOSTS)) {
                 try {
-                    return rawIpRequest(method, path, reqHeaders, body)
-                } catch (e2: Exception) { }
-                throw Exception("网络不通，请切换网络(WiFi/流量)后重试")
-            } finally {
-                pool.shutdownNow()
+                    val result = httpsRequest(domain, method, path, reqHeaders, body)
+                    rememberPanel(domain)
+                    return result
+                } catch (_: Exception) {
+                }
             }
+            throw Exception("网络不通，请切换网络(WiFi/流量)后重试")
         }
 
-        /** 注册 WebView 用：依次探测各面板域名，返回第一个能连通的（被封的自动跳过）。 */
+        /** 注册 / 忘记密码 WebView：按顺序探测，跳过 p1，返回第一个能连通的域名。 */
         fun firstReachablePanelDomain(): String {
-            val fdomains = listOf(XBOARD_PANEL_DOMAIN, "p2.yuntanlu.com", "w1.yuntanlu.com", "w2.yuntanlu.com")
-            val fpool = java.util.concurrent.Executors.newFixedThreadPool(fdomains.size)
-            try {
-                val tasks = fdomains.map { d ->
-                    java.util.concurrent.Callable {
-                        val conn = java.net.URL("https://$d/api/v1/guest/comm/config")
-                            .openConnection() as javax.net.ssl.HttpsURLConnection
-                        conn.connectTimeout = 2500; conn.readTimeout = 5000
-                        val code = conn.responseCode
-                        conn.disconnect()
-                        if (code in 200..499) d else throw Exception("bad")
+            for (d in orderedHosts(WEB_PANEL_HOSTS)) {
+                try {
+                    val (code, _) = httpsRequest(d, "GET", "/api/v1/guest/comm/config", emptyMap(), null)
+                    if (code in 200..499) {
+                        rememberPanel(d)
+                        return d
                     }
+                } catch (_: Exception) {
                 }
-                return fpool.invokeAny(tasks, 8, java.util.concurrent.TimeUnit.SECONDS)
-            } catch (e: Exception) {
-                return XBOARD_PANEL_DOMAIN
-            } finally {
-                fpool.shutdownNow()
+            }
+            return XBOARD_PANEL_DOMAIN
+        }
+
+        private fun preferredPanel(): String? = try {
+            Global.application
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_PREFERRED_PANEL, null)
+                ?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+
+        private fun rememberPanel(host: String) {
+            try {
+                Global.application
+                    .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PREFERRED_PANEL, host)
+                    .apply()
+            } catch (_: Exception) {
             }
         }
 
@@ -169,8 +193,8 @@ class SetupActivity : AppCompatActivity() {
             val conn = java.net.URL("https://$domain$path")
                 .openConnection() as javax.net.ssl.HttpsURLConnection
             conn.requestMethod = method
-            conn.connectTimeout = 2500
-            conn.readTimeout = 6000
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("Accept", "application/json")
             reqHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
@@ -179,81 +203,49 @@ class SetupActivity : AppCompatActivity() {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.outputStream.use { it.write(body) }
             }
-            val code = conn.responseCode   // 抛异常=连接层失败=回退 IP
+            val code = conn.responseCode
             val stream = if (code in 200..399) conn.inputStream else conn.errorStream
             val text = (stream?.readBytes() ?: ByteArray(0)).toString(Charsets.UTF_8)
             conn.disconnect()
             return code to text
         }
 
-        private fun rawIpRequest(
-            method: String, path: String,
-            reqHeaders: Map<String, String>, body: ByteArray?
-        ): Pair<Int, String> {
-            val socket = Socket()
-            socket.connect(InetSocketAddress(InetAddress.getByName(XBOARD_IP), XBOARD_API_PORT), 8000)
-            socket.soTimeout = 15000
-
-            val out = socket.outputStream
-            val req = buildString {
-                append("$method $path HTTP/1.1\r\n")
-                append("Host: $XBOARD_HOST\r\n")
-                append("Accept: application/json\r\n")
-                append("Accept-Encoding: identity\r\n")
-                append("Connection: close\r\n")
-                reqHeaders.forEach { (k, v) -> append("$k: $v\r\n") }
-                if (body != null) {
-                    append("Content-Type: application/json\r\n")
-                    append("Content-Length: ${body.size}\r\n")
-                }
-                append("\r\n")
-            }
-            out.write(req.toByteArray(Charsets.UTF_8))
-            body?.let { out.write(it) }
-            out.flush()
-
-            val raw = socket.inputStream.readBytes()
-            socket.close()
-            val r = parseRawHttp(raw)
-            return r.code to r.body.toString(Charsets.UTF_8)
-        }
-
-        private fun decodeChunked(data: ByteArray): ByteArray {
-            val out = ByteArrayOutputStream()
-            var pos = 0
-            while (pos < data.size) {
-                var end = pos
-                while (end < data.size - 1 &&
-                    !(data[end] == 13.toByte() && data[end + 1] == 10.toByte())) end++
-                if (end >= data.size - 1) break
-                val size = data.copyOfRange(pos, end).toString(Charsets.UTF_8).trim()
-                    .toIntOrNull(16) ?: break
-                if (size == 0) break
-                pos = end + 2
-                if (pos + size > data.size) break
-                out.write(data, pos, size)
-                pos += size + 2
-            }
-            return out.toByteArray()
-        }
-
     }
 
     private var useUrlMode = false
+    private var panelWeb: WebView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         showLoginMode()
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (panelWeb != null) {
+            closePanelWeb()
+            showLoginMode()
+            return
+        }
+        super.onBackPressed()
+    }
+
     private fun showLoginMode() {
+        panelWeb = null
         useUrlMode = false
         setContentView(buildLayout())
     }
 
     private fun showUrlMode() {
+        panelWeb = null
         useUrlMode = true
         setContentView(buildLayout())
+    }
+
+    private fun closePanelWeb() {
+        val wv = panelWeb
+        panelWeb = null
+        wv?.destroy()
     }
 
     private fun buildLayout(): LinearLayout {
@@ -321,6 +313,15 @@ class SetupActivity : AppCompatActivity() {
                 setPadding(0, (16 * dp).toInt(), 0, 0)
                 isClickable = true
                 setOnClickListener { showUrlMode() }
+            })
+            layout.addView(TextView(this).apply {
+                text = "忘记密码？"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(0xFF7C3AED.toInt())
+                setPadding(0, (12 * dp).toInt(), 0, 0)
+                isClickable = true
+                setOnClickListener { showForgotWebView() }
             })
             layout.addView(TextView(this).apply {
                 text = "还没有账号？点此注册"
@@ -494,11 +495,28 @@ class SetupActivity : AppCompatActivity() {
                 backToAppLoginIfDone(url)
             }
         }
+        panelWeb = wv
         setContentView(wv)
-        // 多通道：后台先找一个能连通的面板域名再加载注册页（写死单域名被封会 ERR_CONNECTION_ABORTED 白屏）
+        // 按顺序找一个能打开的面板（不含 p1），再加载注册页。
         Thread {
             val d = firstReachablePanelDomain()
-            runOnUiThread { wv.loadUrl("https://$d/#/register") }
+            runOnUiThread { if (panelWeb === wv) wv.loadUrl("https://$d/#/register") }
+        }.start()
+    }
+
+    private fun showForgotWebView() {
+        val wv = WebView(this)
+        wv.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            setSupportZoom(false)
+        }
+        wv.webViewClient = WebViewClient()
+        panelWeb = wv
+        setContentView(wv)
+        Thread {
+            val d = firstReachablePanelDomain()
+            runOnUiThread { if (panelWeb === wv) wv.loadUrl("https://$d/#/forget") }
         }.start()
     }
 

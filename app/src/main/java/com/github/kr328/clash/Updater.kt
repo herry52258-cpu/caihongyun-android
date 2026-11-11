@@ -16,24 +16,12 @@ import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * app 内在线更新（多通道抗封）：
- *   1. 依次从多个未被墙域名拉 /version.json（任一成功即用）
+ * app 内在线更新：
+ *   1. 先从新面板入口拉 /version.json，再试下载站，最后才是旧地址
  *   2. versionCode 比当前大 → 弹更新框（changelog + 立即更新）
- *   3. 下载 APK 同样多通道回退（原url→cdn4→cdn6→cdn7→dl→apex），单域名被 GFW reset 自动切换
- *
- * 域名被封时：服务器泛域名底座加新子域名，并把这里 DOMAINS 补一条即可。
+ *   3. APK 按 down.yuntanlu.com → ndl.lianjieni.com → dl.yuntanlu.com 下载
  */
 object Updater {
-
-    // 多通道域名（查版本 + 下 APK 共用）。都需在服务器挂了 /version.json 与 /downloads/。
-    private val DOMAINS = listOf(
-        "https://p1.yuntanlu.com",
-        "https://p2.yuntanlu.com",
-        "https://w1.yuntanlu.com",
-        "https://dl.yuntanlu.com",
-        "https://w2.yuntanlu.com",
-        "https://w3.yuntanlu.com",
-    )
 
     // 每次启动至多提示一次，避免来回切前台反复弹
     @Volatile private var promptedThisSession = false
@@ -129,14 +117,13 @@ object Updater {
             outDir.listFiles()?.forEach { it.delete() }
             val apk = File(outDir, "caihongmao-update.apk")
 
-            // 多通道下载：原 url 先试，再依次试各域名的 /downloads/<文件名>；被封自动切换
+            // 下载站顺序：down.yuntanlu.com → ndl.lianjieni.com → dl.yuntanlu.com，最后才试 version.json 里的原地址。
             val fileName = apkUrl.substringAfterLast("/")
-            val urls = ArrayList<String>()
-            urls.add(apkUrl)
-            for (base in DOMAINS) {
-                val u = "$base/downloads/$fileName"
-                if (u != apkUrl) urls.add(u)
+            val urls = LinkedHashSet<String>()
+            for (base in SetupActivity.DOWNLOAD_BASES) {
+                urls.add("$base/downloads/$fileName")
             }
+            if (apkUrl.startsWith("https://")) urls.add(apkUrl)
 
             var ok = false
             var lastErr: Exception? = null
@@ -163,7 +150,7 @@ object Updater {
                 } else {
                     AlertDialog.Builder(activity)
                         .setTitle("更新失败")
-                        .setMessage("下载失败：${lastErr?.message ?: "网络异常"}。可稍后重试，或到 dl.yuntanlu.com 手动下载。")
+                        .setMessage("下载失败：${lastErr?.message ?: "网络异常"}。可稍后重试，或到 down.yuntanlu.com 手动下载（打不开再用 dl.yuntanlu.com）。")
                         .setPositiveButton("知道了", null)
                         .show()
                 }
@@ -174,7 +161,7 @@ object Updater {
     /** 单次下载；被 reset 截断或文件异常会抛异常，交由上层切下一条通道。 */
     private fun downloadApkOnce(urlStr: String, apk: File, onPct: (Int) -> Unit) {
         val conn = URL(urlStr).openConnection() as HttpsURLConnection
-        conn.connectTimeout = 4000
+        conn.connectTimeout = 2000
         conn.readTimeout = 30000
         conn.instanceFollowRedirects = true
         conn.connect()
@@ -215,7 +202,7 @@ object Updater {
         } catch (e: Exception) {
             AlertDialog.Builder(activity)
                 .setTitle("无法启动安装")
-                .setMessage("请到 dl.yuntanlu.com 手动下载安装。")
+                .setMessage("请到 down.yuntanlu.com 手动下载安装。")
                 .setPositiveButton("知道了", null)
                 .show()
         }
@@ -225,7 +212,7 @@ object Updater {
 
     /** 依次试各域名的 /version.json，任一返回含 versionCode 的内容即用。 */
     private fun fetchVersionJson(): String? {
-        for (base in DOMAINS) {
+        for (base in SetupActivity.versionJsonBases()) {
             val j = httpGet("$base/version.json")
             if (j != null && j.contains("versionCode")) return j
         }
@@ -240,8 +227,8 @@ object Updater {
 
     private fun httpGet(url: String): String? = try {
         val conn = URL(url).openConnection() as HttpsURLConnection
-        conn.connectTimeout = 3000
-        conn.readTimeout = 8000
+        conn.connectTimeout = 1500
+        conn.readTimeout = 3000
         conn.setRequestProperty("Cache-Control", "no-cache")
         if (conn.responseCode == 200)
             conn.inputStream.readBytes().toString(Charsets.UTF_8) else null
