@@ -121,6 +121,15 @@ class PurchaseActivity : AppCompatActivity() {
         ben.addView(benR, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         body.addView(ben)
 
+        // 套餐列表上方的推荐说明。购买页是固定深色、中文写在代码里，这里沿用同一套，不另做主题或语言分支。
+        body.addView(TextView(this).apply {
+            text = "强烈推荐少人共享专线。常刷 TikTok、看 YouTube 或在线 4K 视频，优先考虑专线，减少多人争抢带宽。实际流畅度仍受本地网络和时段影响。"
+            textSize = 12.5f
+            setTextColor(Color.parseColor("#c9a9d6"))
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(2), dp(10), dp(2), 0)
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         // plan container
         planBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
         body.addView(planBox)
