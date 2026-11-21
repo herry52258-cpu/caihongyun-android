@@ -5,5 +5,9 @@
             android:name=".LineRefreshPreviewActivity"
             android:exported="true"
             android:theme="@style/BootstrapTheme" />
+        <!-- debug 包才能从 adb 打开。正式包没有这个入口。 -->
+        <activity
+            android:name=".PurchasePreviewActivity"
+            android:exported="true" />
     </application>
 </manifest>

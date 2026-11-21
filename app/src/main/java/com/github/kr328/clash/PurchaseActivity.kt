@@ -45,6 +45,7 @@ class PurchaseActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (PurchaseMocks.intercept(this)) return
         token = getSharedPreferences(SetupActivity.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(SetupActivity.KEY_AUTH_TOKEN, null)
         setContentView(buildScaffold())
@@ -121,6 +122,16 @@ class PurchaseActivity : AppCompatActivity() {
         ben.addView(benR, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         body.addView(ben)
 
+        // 套餐列表上方的推荐说明。购买页是固定深色、中文写在代码里，这里沿用同一套，不另做主题或语言分支。
+        body.addView(TextView(this).apply {
+            tag = "purchase_note"
+            text = PURCHASE_DEDICATED_NOTE
+            textSize = 12.5f
+            setTextColor(Color.parseColor("#c9a9d6"))
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(2), dp(10), dp(2), 0)
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         // plan container
         planBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
         body.addView(planBox)
@@ -128,6 +139,7 @@ class PurchaseActivity : AppCompatActivity() {
         // footer
         val foot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(16)) }
         ctaBtn = TextView(this).apply {
+            tag = "purchase_cta"
             text = "立即开通"; textSize = 17f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
             setPadding(0, dp(15), 0, dp(15))
             background = pill(18, intArrayOf(0xFFff1e6e.toInt(), 0xFFff6a00.toInt(), 0xFF00c8ff.toInt(), 0xFFc433ff.toInt()))
@@ -163,7 +175,7 @@ class PurchaseActivity : AppCompatActivity() {
             cards["${p.id}-${p.period}"] = card
         }
         // default select recommended (year) or first
-        selected = plans.firstOrNull { it.period == "year_price" } ?: plans.firstOrNull()
+        selected = defaultPurchasePlan(plans)
         selected?.let { select(it) }
     }
 
@@ -207,25 +219,15 @@ class PurchaseActivity : AppCompatActivity() {
 
     private fun parsePlans(resp: String) {
         plans.clear()
-        val arr = JSONObject(resp).optJSONArray("data") ?: return
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            if (o.optInt("show", 1) == 0) continue
-            val id = o.getInt("id"); val name = o.optString("name"); val content = o.optString("content").take(40)
-            val periods = listOf(
-                "month_price" to "/月", "quarter_price" to "/季", "half_year_price" to "/半年",
-                "year_price" to "/年", "two_year_price" to "/2年", "three_year_price" to "/3年", "onetime_price" to "/永久"
-            )
-            // 阶梯套餐一个 plan 有多个周期价，每个非零周期都生成一张卡(不能 break)
-            for ((key, label) in periods) {
-                if (!o.isNull(key)) {
-                    val price = o.getInt(key)
-                    if (price <= 0) continue
-                    val orig = if (key == "onetime_price" && price == 99900) 199900 else null
-                    plans.add(PlanItem(id, name, content, price, key, label, orig))
-                }
-            }
-        }
+        plans.addAll(parsePlanItems(resp))
+    }
+
+    internal fun showIsolatedPlans(items: List<PlanItem>, status: String) {
+        setContentView(buildScaffold())
+        plans.clear()
+        plans.addAll(items)
+        heroSub.text = status
+        renderPlans()
     }
 
     private fun parsePayments(resp: String) {
@@ -256,18 +258,11 @@ class PurchaseActivity : AppCompatActivity() {
     }
 
     // ---------- buy ----------
-    // 支付通道单笔限额(分)：支付宝 ¥1-300，微信 ¥1-1000。超限的通道会返回"没有找到符合金额要求的支付通道"
-    private fun payMax(name: String): Int = when {
-        name.contains("支付宝") -> 30000
-        name.contains("微信") -> 100000
-        else -> Int.MAX_VALUE
-    }
-
     private fun onBuy() {
         val p = selected ?: run { toast("请选择套餐"); return }
         if (payments.isEmpty()) { toast("暂无可用支付方式"); return }
         // 按金额过滤可用支付方式；若全部超限则兜底显示全部
-        val avail = payments.filter { p.price <= payMax(it.name) }.ifEmpty { payments }
+        val avail = payments.filter { p.price <= purchasePayMaxCents(it.name) }.ifEmpty { payments }
         if (avail.size == 1) { doOrder(p, avail[0]) ; return }
         val names = avail.map { it.name }.toTypedArray()
         AlertDialog.Builder(this).setTitle("选择支付方式")
