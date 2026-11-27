@@ -39,8 +39,10 @@ class SetupActivity : AppCompatActivity() {
         const val APP_VERSION = "2.11.42"
         const val XBOARD_HOST = "caihongmao.org"
         const val XBOARD_BASE = "https://$XBOARD_HOST"
-        // 新面板入口，按这个顺序逐个试。都指向同一个 Xboard，挂在 Cloudflare 后面。只写域名。
+        // 新面板入口，按这个顺序逐个试。优先走 api.531069.xyz 国内优化反代，其余作备用。只写域名。
         val NEW_PANEL_HOSTS = listOf(
+            "api.531069.xyz",
+            "531069.xyz",
             "nlogin.lianjieni.com",
             "np1.lianjieni.com",
             "login.lianjieni.com",
@@ -56,13 +58,15 @@ class SetupActivity : AppCompatActivity() {
         )
         // 注册、忘记密码、邀请链接不使用 p1。
         val WEB_PANEL_HOSTS = NEW_PANEL_HOSTS + OLD_PANEL_HOSTS.filter { it != "p1.yuntanlu.com" }
-        const val XBOARD_PANEL_DOMAIN = "nlogin.lianjieni.com"
+        const val XBOARD_PANEL_DOMAIN = "api.531069.xyz"
         private const val KEY_PREFERRED_PANEL = "preferred_panel_host"
         private const val CONNECT_TIMEOUT_MS = 1500
         private const val READ_TIMEOUT_MS = 3500
 
         // 检查更新：先新面板（这些域名上有 /version.json），再下载站，最后旧地址。
         val VERSION_JSON_BASES = listOf(
+            "https://api.531069.xyz",
+            "https://531069.xyz",
             "https://nlogin.lianjieni.com",
             "https://np1.lianjieni.com",
             "https://login.lianjieni.com",
